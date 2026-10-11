@@ -514,11 +514,40 @@ this broken example — you'll reuse it in Phase 11's `critic_catch_rate`.
   was required"; a case the router sent straight to `END` keeps the
   `False` default from `new_case_state`.
 
-### Requirements: `aml_agents/graph.py`
+### Requirements: `aml_agents/graph.py` — "design A"
 
-**`route_after_critic(state: CaseState) -> str`** — a pure function of
-state; it cannot mutate state (LangGraph conditional-edge functions only
-choose a destination). Precedence **matters** — check in this exact order:
+Entity Resolution and Adverse Media are independent of each other — both
+read only `state["entity_name"]` and write disjoint state keys
+(`entity_candidates`/`entity_resolved` vs. `adverse_media_findings`) — so
+they run as **parallel branches** off `planner` instead of a linear chain.
+This also closes a gap in the original design: `planner_node` already
+produces `state["plan"]`, but nothing downstream ever read it — the graph's
+edges were hard-coded regardless of what the plan said. Two new routers fix
+that: the plan now genuinely decides whether Retrieval and Risk Analyst run.
+
+**`route_after_evidence_gathering(state: CaseState) -> str`** — the
+conditional edge attached to **both** `entity_resolution` and
+`adverse_media` (the fan-in point; see R4 below for why one router function
+on two source nodes is safe and still runs its destination exactly once).
+Pure function of `state["plan"]` only — never of which branch called it, so
+both calls always agree on a destination for a given run.
+1. `state["plan"]` is `None`, or `"retrieval" in plan.steps` -> return
+   `"retrieval"`. A missing plan defaults to "run everything", the same
+   convention `planner.build_static_plan` uses for its own step list.
+2. Otherwise, if `"risk_analyst" in plan.steps` -> return `"risk_analyst"`
+   (retrieval explicitly skipped).
+3. Otherwise -> return `"__end__"` (plan calls for neither).
+
+**`route_after_retrieval(state: CaseState) -> str`** — conditional edge out
+of `retrieval`. Same plan-reading convention:
+1. `state["plan"]` is `None`, or `"risk_analyst" in plan.steps` -> return
+   `"risk_analyst"`.
+2. Otherwise -> return `"__end__"`.
+
+**`route_after_critic(state: CaseState) -> str`** — unchanged from the
+original design; a pure function of state, cannot mutate it (conditional-edge
+functions only choose a destination). Precedence **matters** — check in
+this exact order:
 1. `critic_feedback.verdict == "revise"` **and** `revision_count <
    config.MAX_REVISIONS` -> return `"risk_analyst"`. Check this first, or a
    low-confidence "revise" verdict could get short-circuited to
@@ -537,12 +566,30 @@ choose a destination). Precedence **matters** — check in this exact order:
 - R2: Add all 7 nodes: `planner`, `entity_resolution`, `adverse_media`,
   `retrieval`, `risk_analyst`, `critic`, `human_gate`, mapped to their node
   functions.
-- R3: Fixed edges: `START -> planner -> entity_resolution -> adverse_media
-  -> retrieval -> risk_analyst -> critic`.
-- R4: `graph.add_conditional_edges("critic", route_after_critic,
+- R3: Fan-out: `graph.add_edge(START, "planner")`, then **plain**
+  (non-conditional) edges `graph.add_edge("planner", "entity_resolution")`
+  and `graph.add_edge("planner", "adverse_media")` — both always run, the
+  plan does not gate evidence-gathering itself (only what happens after it).
+- R4: Fan-in: attach `route_after_evidence_gathering` as a conditional edge
+  on **both** `entity_resolution` and `adverse_media`, with the same
+  mapping on each: `graph.add_conditional_edges("entity_resolution",
+  route_after_evidence_gathering, {"retrieval": "retrieval", "risk_analyst":
+  "risk_analyst", "__end__": END})`, and the identical call with
+  `"adverse_media"` as the source. This is **not** a bug — LangGraph's
+  superstep model runs a shared destination exactly once even when two
+  upstream conditional edges both resolve to it, the same dedup behaviour
+  as a plain two-edges-into-one-node fan-in. (Verify this yourself against
+  your installed LangGraph version before trusting it blindly — build a
+  throwaway stub graph with call-counting node functions, the same way you'd
+  verify any other non-obvious framework behaviour, rather than taking this
+  doc's word for it.)
+- R5: `graph.add_conditional_edges("retrieval", route_after_retrieval,
+  {"risk_analyst": "risk_analyst", "__end__": END})`.
+- R6: `graph.add_edge("risk_analyst", "critic")`.
+- R7: `graph.add_conditional_edges("critic", route_after_critic,
   {"risk_analyst": "risk_analyst", "human_gate": "human_gate", "__end__": END})`.
-- R5: `graph.add_edge("human_gate", END)`.
-- R6: Compile: if `checkpointer is not None`, pass
+- R8: `graph.add_edge("human_gate", END)`.
+- R9: Compile: if `checkpointer is not None`, pass
   `checkpointer=checkpointer, interrupt_before=["human_gate"]` to
   `graph.compile(...)`; otherwise compile with no extra kwargs (this is
   what lets `tests/test_graph_structure.py` compile the graph without a
@@ -553,7 +600,9 @@ choose a destination). Precedence **matters** — check in this exact order:
   against your installed version.
 
 **Acceptance criteria:** `uv run pytest tests/test_graph_structure.py -q`
-passes all 7 tests.
+passes all 14 tests (the original 7 plus the 7 added for the fan-out/plan
+routing — see that file's own docstring for why it grew rather than just
+turning green this time).
 
 ---
 

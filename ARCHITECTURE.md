@@ -19,7 +19,7 @@ instead of staying abstract.
 | 4 | Retrieval (RAG) | Tool-using specialist | Fetch and rank the regulatory passages relevant to the case | Limited — ranking, not content |
 | 5 | Risk Analyst | Synthesis / reasoning | Combine all evidence into a structured, cited risk memo | Yes — the actual assessment |
 | 6 | Critic | Evaluator / reflection | Check the memo against evidence; approve or send back for revision | Yes — approve/revise verdict |
-| 7 | Router (conditional edges) | Control-flow | Decide the next node from current state: revise / escalate / done | Yes — control flow |
+| 7 | Router (conditional edges) | Control-flow | Three routers, each a pure function of state: `route_after_evidence_gathering` and `route_after_retrieval` decide whether Retrieval/Risk Analyst run at all (reading `state["plan"]`); `route_after_critic` decides revise / escalate / done | Yes — control flow |
 | 8 | Human Gate | Human-in-the-loop | Pause execution for a human decision on high-risk/low-confidence cases | No — defers by design |
 | 9 | Memory (checkpointer + case store) | Infrastructure | Persist working state and the durable case record | No — no judgment, just persistence |
 
@@ -34,33 +34,53 @@ Two things are worth noticing:
   domain, "defer to a human" is a first-class, designed decision path, not
   an afterthought bolted on later.
 
-## Graph shape
+## Graph shape ("design A": parallel evidence-gathering + plan-driven routing)
 
 ```mermaid
 flowchart TD
     START([start]) --> PLAN[Planner]
     PLAN --> ER[Entity Resolution]
-    ER --> AM[Adverse Media]
-    AM --> RET[Retrieval / RAG]
-    RET --> RA[Risk Analyst]
-    RA --> CRIT{Critic}
+    PLAN --> AM[Adverse Media]
+    ER --> ROUTE1{route_after_evidence_gathering}
+    AM --> ROUTE1
+    ROUTE1 -- "retrieval" in plan --> RET[Retrieval / RAG]
+    ROUTE1 -- plan skips retrieval --> RA[Risk Analyst]
+    ROUTE1 -- plan wants neither --> DONE([end])
+    RET --> ROUTE2{route_after_retrieval}
+    ROUTE2 -- "risk_analyst" in plan --> RA
+    ROUTE2 -- plan skips risk_analyst --> DONE
+    RA --> CRIT{route_after_critic}
     CRIT -- unsupported claims, retries left --> RA
-    CRIT -- approved, low risk --> DONE([end])
-    CRIT -- approved but high risk, or retries exhausted --> HG[Human Gate]
+    CRIT -- approved, confident, low risk --> DONE
+    CRIT -- high risk, or low confidence, or retries exhausted --> HG[Human Gate]
     HG --> DONE
 ```
 
-- Steps 2–4 (evidence gathering) are a fixed sequence — there's no benefit
-  to making that dynamic, and a fixed sequence is easier to test and reason
-  about. Save "dynamic planning" for where it actually earns its complexity
-  (PROJECT_PLAN.md Phase 13).
-- Steps 5–6 form a **bounded** reflection loop (`config.MAX_REVISIONS`).
-  Reflection loops that aren't bounded are the most common way a demo turns
-  into an incident. See PROJECT_PLAN.md Phase 9 for the exact routing
-  precedence this bound depends on.
+- **Entity Resolution and Adverse Media run as parallel branches**, not a
+  fixed sequence — both read only `state["entity_name"]` and write disjoint
+  state keys, so there's no data dependency between them (see design
+  principle 1). This is a deliberate change from the original sequential
+  design: see PROJECT_PLAN.md Phase 9 for the two conditional-edge routers
+  this introduces, and why both branches can share one router function
+  safely.
+- **The Planner's `state["plan"]` now actually controls execution**, not
+  just records intent. `route_after_evidence_gathering` and
+  `route_after_retrieval` read `plan.steps` to decide whether Retrieval and
+  Risk Analyst even run — a plan that omits a step genuinely skips it. A
+  missing plan (`state["plan"] is None`) defaults to running everything,
+  the same convention as `planner.build_static_plan`'s full step list.
+  Entity Resolution and Adverse Media themselves are **not** plan-gated —
+  they're reached by plain, unconditional edges and always both run; the
+  plan only gates what happens after they join.
+- The reflection loop (Risk Analyst ⇄ Critic) is still a **bounded** loop
+  (`config.MAX_REVISIONS`) and is unaffected by the above — a critic
+  "revise" verdict re-enters only at `risk_analyst`, never back through the
+  parallel evidence-gathering branches. Reflection loops that aren't
+  bounded are the most common way a demo turns into an incident.
 - The **Human Gate is a genuine terminal-ish node**, not a formality: it's
-  reached whenever the risk score clears a threshold *or* the critic gives
-  up, and the graph only proceeds past it on a recorded human decision.
+  reached whenever the risk score clears a threshold, or the critic's own
+  confidence is low, or retries are exhausted, and the graph only proceeds
+  past it on a recorded human decision.
 
 ## Design principles (why this shouldn't contradict itself)
 
@@ -85,7 +105,9 @@ flowchart TD
    PROJECT_PLAN.md Phases 7–9.)
 4. **Bounded loops, everywhere.** The only cycle in the graph
    (Critic → Risk Analyst) has an explicit revision counter and a hard cap.
-   There are no other cycles.
+   The Entity Resolution / Adverse Media fan-out is parallel branching, not
+   a cycle — each branch runs at most once per case, regardless of how many
+   times the reflection loop fires. There are no other cycles.
 5. **The LLM backend is a config detail, not an architectural one.**
    `llm_client.py` is the only file that knows whether you're calling the
    Anthropic API or a local model. No node should import a provider SDK
@@ -101,3 +123,12 @@ makes a seven-agent handoff debuggable: given a `case_id`, you can print the
 full trace and see exactly which agent produced which claim, rather than
 re-running the whole graph with print statements. See PROJECT_PLAN.md
 Phase 12.
+
+One consequence of the Entity Resolution / Adverse Media fan-out: their two
+trace entries are no longer guaranteed to appear in a fixed order — whichever
+branch's superstep finishes first appends first. This is safe (the `trace`
+field's `operator.add` reducer merges concurrent appends correctly — verified
+against a live run, not assumed) but means "read the trace top to bottom as
+a strict timeline" is only reliable within each branch, not across the two
+parallel ones. Each `AgentTrace` entry's own `timestamp` field still gives
+you a true ordering if you need one.

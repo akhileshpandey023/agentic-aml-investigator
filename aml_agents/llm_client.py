@@ -84,7 +84,6 @@ class LocalOpenAICompatLLMClient(LLMClient):
             "stream": False
         }
         url = f'{self._base_url}/api/chat'
-        print(url)
         try:
             response = requests.post(url, json=payload)
             response.raise_for_status()

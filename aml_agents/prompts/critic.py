@@ -1,0 +1,1 @@
+CRITIC_PROMPT = ''

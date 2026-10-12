@@ -92,6 +92,8 @@ def risk_analyst_node(state: CaseState) -> dict:
                                                      user=evidence_found)
             risk_memo = _parse_risk_memo(llm_response['text'], state['entity_name']) # type: ignore
 
+    state['risk_memo'] = risk_memo
+    
     if state['critic_feedback'] is not None:
         is_revision = True
     else:
@@ -102,7 +104,7 @@ def risk_analyst_node(state: CaseState) -> dict:
     return {"risk_memo": risk_memo, 
             "revision_count": state['revision_count'], 
             **make_trace(
-                node_name='retrieval',
+                node_name='risk_analyst',
                 summary_in=f"{state}",
                 summary_out=f"{risk_memo}",
                             duration_ms=end_time-start_time

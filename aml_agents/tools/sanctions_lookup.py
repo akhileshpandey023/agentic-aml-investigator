@@ -71,7 +71,7 @@ def lookup(
         df = _load_list(source_list)
         choices = df["name"].tolist()
         results = process.extract(query=name, choices=choices, scorer=fuzz.WRatio, limit=top_k)
-        for matched_name, score, idx in results:
+        for _ , score, idx in results:
             if score < min_score:
                 continue
             all_matches.append(_row_to_match(df.iloc[idx], source_list, float(score)))

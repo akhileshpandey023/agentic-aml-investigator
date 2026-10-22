@@ -12,7 +12,7 @@ import time
 
 from aml_agents.schemas import CaseState, make_trace
 from aml_agents.tools.adverse_media_search import search
-
+from aml_agents import config
 
 def adverse_media_node(state: CaseState) -> dict:
     """TODO: call aml_agents.tools.adverse_media_search.search on
@@ -25,7 +25,7 @@ def adverse_media_node(state: CaseState) -> dict:
     start_time = time.perf_counter()
     try:
         adversial_media_result = search(state["entity_name"])
-        subset_result = [item for item in adversial_media_result if item.relevance_score >= 0.15] 
+        subset_result = [item for item in adversial_media_result if item.relevance_score >= config.ADVERSE_MEDIA_RELEVANCE_SCORE] 
     except FileNotFoundError:
         adversial_media_result = []
         subset_result = []

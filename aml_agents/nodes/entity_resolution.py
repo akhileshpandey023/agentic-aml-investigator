@@ -29,7 +29,7 @@ def entity_resolution_node(state: CaseState) -> dict:
                                  top_k=config.ENTITY_MATCH_TOP_K,
                                  min_score=config.ENTITY_MATCH_MIN_SCORE)
 
-    top_candidates = [item for item in list_entity_matches if item.match_score > config.ENTITY_MATCH_MIN_SCORE]
+    top_candidates = [item for item in list_entity_matches if item.match_score >= config.ENTITY_MATCH_MIN_SCORE]
     top_one = top_candidates[0] if len(top_candidates) > 0 else None
     end_time = time.perf_counter()
 

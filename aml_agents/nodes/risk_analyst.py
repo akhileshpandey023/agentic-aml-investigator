@@ -88,7 +88,7 @@ def risk_analyst_node(state: CaseState) -> dict:
             risk_memo = _parse_risk_memo(llm_response['text'], state['entity_name']) # type: ignore
         except (json.JSONDecodeError, ValidationError) as e:
             attempt += 1
-            llm_response = get_llm_client().complete(system=RISK_ANALYST_PROMPT + f'Address the expcetion {e} to ensure output is correct', 
+            llm_response = get_llm_client().complete(system=RISK_ANALYST_PROMPT + f'Address the exception {e} to ensure output is correct', 
                                                      user=evidence_found)
             risk_memo = _parse_risk_memo(llm_response['text'], state['entity_name']) # type: ignore
 
@@ -106,6 +106,7 @@ def risk_analyst_node(state: CaseState) -> dict:
             **make_trace(
                 node_name='risk_analyst',
                 summary_in=f"{state}",
+                token_usage={'input_token': int(llm_response.input_tokens), 'output_token': int(llm_response.output_tokens)}, # type: ignore
                 summary_out=f"{risk_memo}",
                             duration_ms=end_time-start_time
                             ),

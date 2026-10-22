@@ -49,6 +49,7 @@ EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-4B"
 
 # --- Adverse media ---
 ADVERSE_MEDIA_TOP_K = 5
+ADVERSE_MEDIA_RELEVANCE_SCORE = 0.15
 
 # --- Risk / reflection loop ---
 MAX_REVISIONS = 2  # bound on the critic -> risk_analyst loop

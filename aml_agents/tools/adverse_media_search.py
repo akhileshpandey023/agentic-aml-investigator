@@ -65,7 +65,7 @@ def search(entity_name: str, *, top_k: int = config.ADVERSE_MEDIA_TOP_K) -> list
     
     bm25_scores_norm = [score / max(bm25_scores) for score in bm25_scores]
 
-    filtered_pairs = [(idx, score) for idx, score in enumerate(bm25_scores_norm) if score >= 0]
+    filtered_pairs = [(idx, score) for idx, score in enumerate(bm25_scores_norm) if score > 0]
     sorted_pairs = sorted(filtered_pairs, key=lambda item: item[1], reverse=True)
     final_indices = [idx for idx, _ in sorted_pairs[:top_k]]
 

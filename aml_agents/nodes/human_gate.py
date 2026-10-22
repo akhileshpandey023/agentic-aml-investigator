@@ -9,8 +9,9 @@ Writes: state["risk_memo"] (recommended_action may be overridden),
 """
 
 from __future__ import annotations
+import time
 
-from aml_agents.schemas import CaseState
+from aml_agents.schemas import CaseState, make_trace
 
 
 def human_gate_node(state: CaseState) -> dict:
@@ -22,4 +23,28 @@ def human_gate_node(state: CaseState) -> dict:
     {"risk_memo": ..., "human_review_required": True, **make_trace(...)}.
     """
 
-    raise NotImplementedError("human_gate_node: see PROJECT_PLAN.md Phase 9")
+    start_time = time.perf_counter()
+    memo = state['risk_memo']
+    if state['human_decision'] is None:
+        raise RuntimeError(
+            "human_gate_node reached without a recorded human_decision — the graph "
+            "should have paused before this node ran. Check the interrupt_before "
+            "wiring in graph.py."
+        )
+    updated_memo = memo
+    if state['risk_memo']:
+        if state['human_decision'].decision == 'override_clear':
+            updated_memo = state['risk_memo'].model_copy(update={'recommended_action':'clear'})
+        elif state['human_decision'].decision=='override_escalate':
+            updated_memo = state['risk_memo'].model_copy(update={'recommended_action':'escalate'})
+    
+    end_time = time.perf_counter()
+    
+    return {"risk_memo": updated_memo, 
+            "human_review_required": True, 
+            **make_trace(node_name='human_gate',
+                         summary_in="decision={decision.decision!r} by {decision.reviewer!r}",
+                         summary_out=f"final recommended_action={updated_memo.recommended_action if updated_memo else None}",
+                         duration_ms=(end_time-start_time)*1000
+                         ),
+                         }

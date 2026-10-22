@@ -49,6 +49,6 @@ def planner_node(state: CaseState) -> dict:
             summary_out=(
                 f"Steps created in teh plan: {static_plan.steps}"
                 ),
-                duration_ms=end_time-start_time
+                duration_ms=(end_time-start_time)*1000
                 ),
             }

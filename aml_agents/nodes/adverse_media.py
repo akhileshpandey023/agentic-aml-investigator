@@ -39,7 +39,7 @@ def adverse_media_node(state: CaseState) -> dict:
             summary_out=(
                 f"{len(adversial_media_result)} candidate(s) found in adverse media search of which kept {len(subset_result)} results"
                 ),
-                duration_ms=end_time-start_time
+                duration_ms=(end_time-start_time)*1000
                 ),
         }
 

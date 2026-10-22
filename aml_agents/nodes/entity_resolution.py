@@ -44,6 +44,6 @@ def entity_resolution_node(state: CaseState) -> dict:
                 if top_one 
                 else "no candidates above threshold"
                 ),
-                duration_ms=end_time-start_time
+                duration_ms=(end_time-start_time)*1000
                 ),
             }

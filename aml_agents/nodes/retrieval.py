@@ -59,6 +59,6 @@ def retrieval_node(state: CaseState) -> dict:
                 node_name='retrieval',
                 summary_in=f"query={query!r}",
                 summary_out=f"{len(passages)} passage(s) after rerank",
-                duration_ms=end_time-start_time
+                duration_ms=(end_time-start_time)*1000
                 ),
                 }

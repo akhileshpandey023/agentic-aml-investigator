@@ -89,6 +89,6 @@ def critic_node(state: CaseState) -> dict:
                 summary_in=f"{state}",
                 token_usage={'input_token': int(llm_response.input_tokens), 'output_token': int(llm_response.output_tokens)}, # type: ignore
                 summary_out=f"{parsed_review}",
-                            duration_ms=end_time-start_time
+                            duration_ms=(end_time-start_time)*1000
                             ),
                             }

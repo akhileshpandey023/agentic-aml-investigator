@@ -608,6 +608,26 @@ turning green this time).
 
 ## Phase 10 — Memory & CLI (~1.5 days)
 
+### SQLite setup (read first)
+
+Everything persistent in this project lives in SQLite. You do not create or
+install a database by hand: `sqlite3` ships with Python, and each `.sqlite`
+file is created automatically the first time code connects to its path.
+
+| File (default path under `data/processed/`) | Created by | Holds |
+|---|---|---|
+| `case_store.sqlite` (`config.CASE_STORE_DB_PATH`) | `case_store.init_db` | Durable case record and audit trail (`cases` table) |
+| `checkpoints.sqlite` (`config.LANGGRAPH_CHECKPOINT_DB_PATH`) | `SqliteSaver` | LangGraph working state, so a case can pause at `human_gate` and resume |
+| `eval_results.sqlite` (`config.EVAL_DB_PATH`) | `eval_store.init_eval_db` (Phase 11) | Golden cases, eval runs, per-case results, metrics |
+
+The first two are separate on purpose: the checkpointer is working memory
+for a case that is mid-flight, the case store is the durable record of what
+happened. Do not merge them or write one from the other's schema.
+
+One extra dependency: `SqliteSaver` is in a separate package,
+`langgraph-checkpoint-sqlite` (already added to `pyproject.toml`). Run
+`uv sync` once.
+
 ### Requirements: `aml_agents/memory/case_store.py`
 
 **`_connect(db_path) -> contextmanager yielding sqlite3.Connection`**
@@ -713,6 +733,44 @@ uv run python -m aml_agents.main resume --case-id <id> --decision confirm --revi
   by `node_name` (skip entries where `duration_ms is None`).
 - R2: Per node, return `{"count": ..., "mean_ms": ..., "max_ms": ...}`.
 
+### Requirements: `aml_agents/evaluation/eval_store.py`
+
+All eval output is stored in SQLite at `config.EVAL_DB_PATH`. Do not write
+CSV or JSON result files. Follow the same `_connect` contextmanager pattern
+as `case_store.py` (parent dir created, `sqlite3.Row` row factory, commit on
+the way out, always close).
+
+**Schema** (`_SCHEMA`, executed by `init_eval_db`):
+- `eval_runs(run_id TEXT PRIMARY KEY, started_at TEXT, llm_backend TEXT,
+  llm_model TEXT, config_json TEXT, notes TEXT)` — `config_json` is a
+  snapshot of the thresholds in `config.py` (`ENTITY_MATCH_MIN_SCORE`,
+  `RISK_ESCALATION_THRESHOLD`, etc.) so a metric change can be traced to a
+  config change.
+- `eval_results(run_id TEXT, case_index INTEGER, entity_name TEXT, category
+  TEXT, expected_entity_resolved INTEGER, entity_resolved INTEGER,
+  duration_ms REAL, state_json TEXT, PRIMARY KEY (run_id, case_index))`.
+- `eval_metrics(run_id TEXT, metric_name TEXT, metric_value REAL, details_json
+  TEXT, PRIMARY KEY (run_id, metric_name))`.
+
+**Functions**
+- `init_eval_db(db_path=config.EVAL_DB_PATH)`.
+- `start_run(*, notes="", db_path=...) -> str` — insert an `eval_runs` row,
+  return a new `run_id`.
+- `save_results(run_id, cases, results, db_path=...)` — parallel lists, same
+  contract as `entity_resolution_accuracy`; reuse `_state_to_json` from
+  `case_store`.
+- `save_metric(run_id, name, value, details=None, db_path=...)` — upsert.
+- `compare_runs(run_a, run_b, db_path=...) -> list[dict]` — one row per
+  metric with both values and the difference (a single SQL join).
+
+**Isolation rule:** an eval run executes the graph on every golden case, so
+it also writes checkpoints and case records. Point `CASE_STORE_DB_PATH` and
+`LANGGRAPH_CHECKPOINT_DB_PATH` at throwaway paths (pytest `tmp_path` or a
+temp dir) for the run, and use a unique `thread_id` per golden case so no
+case resumes an old checkpoint. Only `eval_results.sqlite` should persist.
+For `entity_resolution_node`-only runs (the acceptance script below) this
+doesn't apply, since no graph runs.
+
 **`critic_catch_rate` / `retrieval_faithfulness`** — stretch (Phase 13);
 leave as `NotImplementedError` unless you want to build them now. The
 broken `RiskMemo` example you built for Phase 8's manual testing is exactly
@@ -722,10 +780,18 @@ flags.
 
 **Acceptance criteria:** no dedicated test file — write a short script (or
 a notebook cell) that runs `entity_resolution_node` over `all_cases()` from
-`test_cases.py` and feeds the results into `entity_resolution_accuracy`;
-sanity-check the numbers look right given what you know about your golden
-set (e.g. `KNOWN_SANCTIONED` should score very high recall if
-`ENTITY_MATCH_MIN_SCORE` is reasonable).
+`test_cases.py`, feeds the results into `entity_resolution_accuracy` and
+`latency_by_node`, and stores everything with `eval_store` (`start_run`,
+`save_results`, `save_metric`). Sanity-check the numbers look right given
+what you know about your golden set (e.g. `KNOWN_SANCTIONED` should score
+very high recall if `ENTITY_MATCH_MIN_SCORE` is reasonable). Then change
+`ENTITY_MATCH_MIN_SCORE`, run again, and confirm `compare_runs` shows the
+metric movement between the two runs.
+
+**Note on CSV:** the OpenSanctions files in `data/raw/sanctions/` stay CSV
+because that is the format the source publishes and Phase 2's
+`sanctions_lookup` (and its given test) reads them. Nothing this project
+produces is written as CSV.
 
 ---
 

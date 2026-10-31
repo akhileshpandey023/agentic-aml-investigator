@@ -36,6 +36,8 @@ CASE_STORE_DB_PATH = Path(os.getenv("CASE_STORE_DB_PATH", REPO_ROOT / "data" / "
 LANGGRAPH_CHECKPOINT_DB_PATH = Path(
     os.getenv("LANGGRAPH_CHECKPOINT_DB_PATH", REPO_ROOT / "data" / "processed" / "checkpoints.sqlite")
 )
+# Persistent evaluation results (Phase 11). Kept separate from the case store.
+EVAL_DB_PATH = Path(os.getenv("EVAL_DB_PATH", REPO_ROOT / "data" / "processed" / "eval_results.sqlite"))
 
 # --- Entity resolution ---
 ENTITY_MATCH_MIN_SCORE = 85  # rapidfuzz score (0-100) below which a candidate isn't a "hit"

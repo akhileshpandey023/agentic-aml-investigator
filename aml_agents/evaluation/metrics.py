@@ -4,25 +4,65 @@ PROJECT_PLAN.md Phase 11 for detailed requirements for each function.
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 from aml_agents.evaluation.test_cases import GoldenCase
 from aml_agents.schemas import CaseState
 
 
 def entity_resolution_accuracy(cases: list[GoldenCase], results: list[CaseState]) -> dict:
-    """TODO: compare CaseState["entity_resolved"] against each golden case's
-    expected_entity_resolved; return tp/fp/tn/fn counts plus accuracy,
-    precision, recall. See PROJECT_PLAN.md Phase 11.
-    """
+    """Compare entity-resolution outcomes against the golden-case labels."""
+    if len(cases) != len(results):
+        raise ValueError("cases and results must have the same length")
 
-    raise NotImplementedError("entity_resolution_accuracy: see PROJECT_PLAN.md Phase 11")
+    true_positive = false_positive = true_negative = false_negative = 0
+
+    for case, result in zip(cases, results, strict=True):
+        expected = case["expected_entity_resolved"]
+        actual = result["entity_resolved"]
+
+        if expected and actual:
+            true_positive += 1
+        elif not expected and actual:
+            false_positive += 1
+        elif not expected and not actual:
+            true_negative += 1
+        else:
+            false_negative += 1
+
+    total = len(cases)
+    return {
+        "tp": true_positive,
+        "fp": false_positive,
+        "tn": true_negative,
+        "fn": false_negative,
+        "accuracy": (true_positive + true_negative) / total if total else float("nan"),
+        "precision": true_positive / (true_positive + false_positive)
+        if true_positive + false_positive
+        else float("nan"),
+        "recall": true_positive / (true_positive + false_negative)
+        if true_positive + false_negative
+        else float("nan"),
+    }
 
 
 def latency_by_node(results: list[CaseState]) -> dict[str, dict]:
-    """TODO: aggregate AgentTrace.duration_ms per node_name across a batch of
-    runs (count, mean_ms, max_ms per node). See PROJECT_PLAN.md Phase 11.
-    """
+    """Aggregate non-null trace durations by graph-node name."""
+    durations_by_node: dict[str, list[float]] = defaultdict(list)
 
-    raise NotImplementedError("latency_by_node: see PROJECT_PLAN.md Phase 11")
+    for result in results:
+        for trace in result.get("trace", []):
+            if trace.duration_ms is not None:
+                durations_by_node[trace.node_name].append(trace.duration_ms)
+
+    return {
+        node_name: {
+            "count": len(durations),
+            "mean_ms": sum(durations) / len(durations),
+            "max_ms": max(durations),
+        }
+        for node_name, durations in durations_by_node.items()
+    }
 
 
 def critic_catch_rate(_broken_memos_with_known_issues, _critic_reviews) -> float:

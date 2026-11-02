@@ -13,10 +13,15 @@ from __future__ import annotations
 
 import argparse
 import sys
+import json 
 
 from aml_agents.graph import build_graph
 from aml_agents.memory import case_store
 from aml_agents.schemas import HumanDecision, new_case_state
+
+from aml_agents import config
+
+from langgraph.checkpoint.sqlite import SqliteSaver
 
 
 def _get_checkpointer():
@@ -26,7 +31,8 @@ def _get_checkpointer():
     actually pause and resume at human_gate.
     """
 
-    raise NotImplementedError("_get_checkpointer: see PROJECT_PLAN.md Phase 10")
+    return SqliteSaver.from_conn_string(str(config.LANGGRAPH_CHECKPOINT_DB_PATH))
+    
 
 
 def cmd_investigate(args: argparse.Namespace) -> None:
@@ -37,7 +43,19 @@ def cmd_investigate(args: argparse.Namespace) -> None:
     the run paused before producing one). See PROJECT_PLAN.md Phase 10.
     """
 
-    raise NotImplementedError("cmd_investigate: see PROJECT_PLAN.md Phase 10")
+    app = build_graph(checkpointer=_get_checkpointer())
+    state = new_case_state(entity_name=args.entity)
+    run_config = {"configurable": {"thread_id": state["case_id"]}}
+    result = app.invoke(state, config=run_config) # type: ignore
+    case_store.save_case(result) # type: ignore
+
+    print(f"case_id: {result['case_id']}")
+    if result.get("risk_memo"):
+        print(json.dumps(result["risk_memo"].model_dump(), indent=2))
+    else:
+        print("(paused before human_gate, or no memo produced — inspect the trace)")
+        for t in result.get("trace", []):
+            print(f"  [{t.node_name}] {t.summary_out}")
 
 
 def cmd_resume(args: argparse.Namespace) -> None:
@@ -47,15 +65,26 @@ def cmd_resume(args: argparse.Namespace) -> None:
     resume execution past human_gate, save the result, and print the memo.
     """
 
-    raise NotImplementedError("cmd_resume: see PROJECT_PLAN.md Phase 10")
+    app = build_graph(checkpointer=_get_checkpointer())
+    run_config = {"configurable": {"thread_id": args.case_id}}
+    human_decision = HumanDecision(decision= args.decision, reviewer= args.reviewer, notes= args.notes)
 
+    app.update_state(run_config, {"human_decision": human_decision}) # type: ignore
+    result = app.invoke(None, config=run_config) # type: ignore
+
+    case_store.save_case(result) # type: ignore
+
+    print(result.get('memo'))
 
 def cmd_list_pending(_args: argparse.Namespace) -> None:
     """TODO: call case_store.list_cases(pending_human_review=True) and print
     one line per case.
     """
 
-    raise NotImplementedError("cmd_list_pending: see PROJECT_PLAN.md Phase 10")
+    pending_cases = case_store.list_cases(pending_human_review=True)
+    for case in pending_cases:
+        print(f"""Case Id: {case['case_id']}, Entity Name: {case['entity_name']}, 
+        Risk Case: {case['risk_score']}, Recommended Action: {case['recommended_action']}""")
 
 
 def main() -> None:

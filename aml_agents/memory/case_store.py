@@ -124,7 +124,7 @@ def get_case(case_id: str, db_path: Path = config.CASE_STORE_DB_PATH) -> dict | 
     with _connect(db_path) as conn:
         case_info = conn.execute(
             """
-            SELECT * FORM cases
+            SELECT * FROM cases
             WHERE case_id = ?
             """,
             (
@@ -150,7 +150,7 @@ def list_cases(
         if pending_human_review:
             cursor = conn.execute(
                 """
-                SELECT * FORM cases
+                SELECT * FROM cases
                 WHERE human_revie_required = 1 AND
                 human_descision IS NULL
                 ORDER BY updated_at DESC

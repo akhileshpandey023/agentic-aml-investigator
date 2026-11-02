@@ -27,7 +27,26 @@ from aml_agents.nodes.human_gate import human_gate_node
 from aml_agents.nodes.planner import planner_node
 from aml_agents.nodes.retrieval import retrieval_node
 from aml_agents.nodes.risk_analyst import risk_analyst_node
-from aml_agents.schemas import CaseState
+from aml_agents.schemas import CaseState, make_trace
+
+
+def mark_human_review_required(state: CaseState) -> dict:
+    return {
+        "human_review_required": True,
+        **make_trace(
+            node_name="mark_human_review_required",
+            summary_out="Human review required; pausing before human_gate.",
+        ),
+    }
+
+
+def route_after_retrieval(state: CaseState) -> str:
+    plan = state.get("plan")
+
+    if plan is None or "risk_analyst" in plan.steps:
+        return "risk_analyst"
+
+    return "__end__"
 
 
 def route_after_evidence_gathering(state: CaseState) -> str:
@@ -45,9 +64,9 @@ def route_after_evidence_gathering(state: CaseState) -> str:
 
     plan = state['plan']
 
-    if plan is None or plan.steps == 'retrieval':
+    if plan is None or 'retrieval' in plan.steps:
         return "retrieval" 
-    if plan.steps == 'risk_analyst':
+    if 'risk_analyst' in plan.steps:
         return "risk_analyst"
 
     return "__end__"
@@ -65,7 +84,7 @@ def route_after_critic(state: CaseState) -> str:
     memo = state.get("risk_memo")
     revision_count = state.get("revision_count", 0)
 
-    if feedback.verdict is not None and feedback.verdict == 'revise' and state['revision_count'] < config.MAX_REVISIONS: # type: ignore
+    if feedback is not None and feedback.verdict == 'revise' and state['revision_count'] < config.MAX_REVISIONS: # type: ignore
         return 'risk_analyst'
     
     retries_exhausted = feedback is not None and feedback.verdict == "revise"
@@ -96,32 +115,41 @@ def build_graph(checkpointer=None):
     aml_investigator_graph_builder.add_node("risk_analyst", risk_analyst_node)
     aml_investigator_graph_builder.add_node("critic", critic_node)
     aml_investigator_graph_builder.add_node("human_gate", human_gate_node)
+    aml_investigator_graph_builder.add_node("mark_human_review_required", mark_human_review_required)
 
     aml_investigator_graph_builder.add_edge(START, "planner")
     aml_investigator_graph_builder.add_edge("planner", "entity_resolution")
-    aml_investigator_graph_builder.add_conditional_edges(
-            "entity_resolution",
-            route_after_evidence_gathering,
-            {
-                "retrieval": "retrieval",
-                "risk_analyst": "risk_analyst",
-                "__end__": END
+    aml_investigator_graph_builder.add_edge("planner", "adverse_media")
+    for source in ["entity_resolution", "adverse_media"]:
+        aml_investigator_graph_builder.add_conditional_edges(
+                source,
+                route_after_evidence_gathering,
+                {
+                    "retrieval": "retrieval",
+                    "risk_analyst": "risk_analyst",
+                    "__end__": END
 
-            }
-        )
-    aml_investigator_graph_builder.add_edge("entity_resolution", "adverse_media")
-    aml_investigator_graph_builder.add_edge("adverse_media", "retrieval")
-    aml_investigator_graph_builder.add_edge("retrieval", "risk_analyst")
+                }
+            )
+    aml_investigator_graph_builder.add_conditional_edges(
+        "retrieval",
+        route_after_retrieval,
+        {
+            "risk_analyst": "risk_analyst",
+            "__end__": END,
+        },
+    )
     aml_investigator_graph_builder.add_edge("risk_analyst", "critic")
     aml_investigator_graph_builder.add_conditional_edges(
         "critic",
         route_after_critic,
         {
             "risk_analyst": "risk_analyst",
-            "human_gate": "human_gate",
-            "__end__": END
-        }
+            "human_gate": "mark_human_review_required",
+            "__end__": END,
+        },
     )
+    aml_investigator_graph_builder.add_edge("mark_human_review_required", "human_gate")
     aml_investigator_graph_builder.add_edge("human_gate", END)
 
     if checkpointer is None:

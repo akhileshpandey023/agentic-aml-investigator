@@ -80,7 +80,7 @@ def critic_node(state: CaseState) -> dict:
     start_time = time.perf_counter()
     cr_context = _format_review_context(state)
     llm_response = get_llm_client().complete(system=CRITIC_PROMPT, user=cr_context)
-    parsed_review = _parse_critic_review(llm_response['text']) # type: ignore
+    parsed_review = _parse_critic_review(llm_response.text)
     end_time = time.perf_counter()
 
     return {"critic_feedback": parsed_review, 

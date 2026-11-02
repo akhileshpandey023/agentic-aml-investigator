@@ -81,16 +81,21 @@ def risk_analyst_node(state: CaseState) -> dict:
     start_time = time.perf_counter()
     evidence_found = _format_evidence(state)
     risk_memo = None
+    current_system_prompt = RISK_ANALYST_PROMPT
     attempt = 1
-    while attempt < 3:
+    max_attempts = 3
+    while attempt < max_attempts:
         try:
-            llm_response = get_llm_client().complete(system=RISK_ANALYST_PROMPT, user=evidence_found)
-            risk_memo = _parse_risk_memo(llm_response['text'], state['entity_name']) # type: ignore
+            llm_response = get_llm_client().complete(system=current_system_prompt, user=evidence_found)
+            risk_memo = _parse_risk_memo(llm_response.text, state['entity_name']) 
+            break
         except (json.JSONDecodeError, ValidationError) as e:
+            if attempt == max_attempts:
+                raise e
+
+            current_system_prompt=RISK_ANALYST_PROMPT + f'Address the exception {e} to ensure output is correct'
             attempt += 1
-            llm_response = get_llm_client().complete(system=RISK_ANALYST_PROMPT + f'Address the exception {e} to ensure output is correct', 
-                                                     user=evidence_found)
-            risk_memo = _parse_risk_memo(llm_response['text'], state['entity_name']) # type: ignore
+            
 
     state['risk_memo'] = risk_memo
     

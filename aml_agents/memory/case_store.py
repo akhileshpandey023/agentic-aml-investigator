@@ -59,8 +59,8 @@ def _connect(db_path: Path = config.CASE_STORE_DB_PATH) -> Iterator[sqlite3.Conn
 
 def init_db(db_path: Path = config.CASE_STORE_DB_PATH) -> None:
     # TODO: open a connection via _connect and execute _SCHEMA.
-    conn = _connect(db_path)
-    conn.execute(f"{_SCHEMA}") # type: ignore
+    with _connect(db_path) as conn:
+        conn.execute(_SCHEMA)
 
 
 def _state_to_json(state: CaseState) -> str:
@@ -69,9 +69,12 @@ def _state_to_json(state: CaseState) -> str:
     holds EntityMatch/RiskMemo/etc. instances, which json.dumps can't
     serialise on its own).
     """
-    state_str = json.dumps(dict(state), default=CaseState.model_dump) # type: ignore
+    def default(value: object) -> object:
+        if hasattr(value, "model_dump"):
+            return value.model_dump()  # type: ignore[union-attr]
+        raise TypeError(f"Cannot serialize {type(value).__name__}")
 
-    return state_str
+    return json.dumps(dict(state), default=default)
 
 
 def save_case(state: CaseState, db_path: Path = config.CASE_STORE_DB_PATH) -> None:
@@ -151,14 +154,13 @@ def list_cases(
             cursor = conn.execute(
                 """
                 SELECT * FROM cases
-                WHERE human_revie_required = 1 AND
-                human_descision IS NULL
+                WHERE human_review_required = 1 AND
+                human_decision IS NULL
                 ORDER BY updated_at DESC
                 """,
             )
             cases = cursor.fetchall()
             columns = [col[0] for col in cursor.description]
-
             return [dict(zip(columns, row)) for row in cases]
         else:
             cursor = conn.execute(

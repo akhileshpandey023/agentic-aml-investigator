@@ -76,8 +76,8 @@ class LocalOpenAICompatLLMClient(LLMClient):
         payload = {
             'model': self._model, 
             'messages':[
-                {'role': 'system', 'content': system,
-                 'role': 'user', 'content': user}
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': user}
             ], 
             'max_tokens': max_tokens, 
             'temperature': temperature, 

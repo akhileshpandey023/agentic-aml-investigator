@@ -22,17 +22,17 @@ from aml_agents.schemas import HumanDecision, new_case_state
 from aml_agents import config
 
 from langgraph.checkpoint.sqlite import SqliteSaver
+import sqlite3
 
 
-def _get_checkpointer():
-    """TODO (PROJECT_PLAN.md Phase 10): return a real LangGraph checkpointer,
-    e.g. langgraph.checkpoint.sqlite.SqliteSaver pointed at
-    config.LANGGRAPH_CHECKPOINT_DB_PATH, so investigate()/resume() below can
-    actually pause and resume at human_gate.
-    """
+def _get_checkpointer() -> SqliteSaver:
+    db_path = config.LANGGRAPH_CHECKPOINT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    return SqliteSaver.from_conn_string(str(config.LANGGRAPH_CHECKPOINT_DB_PATH))
-    
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
+    checkpointer.setup()
+    return checkpointer
 
 
 def cmd_investigate(args: argparse.Namespace) -> None:
@@ -74,7 +74,8 @@ def cmd_resume(args: argparse.Namespace) -> None:
 
     case_store.save_case(result) # type: ignore
 
-    print(result.get('memo'))
+    print(json.dumps(result["risk_memo"].model_dump(), indent=2))
+
 
 def cmd_list_pending(_args: argparse.Namespace) -> None:
     """TODO: call case_store.list_cases(pending_human_review=True) and print
@@ -84,7 +85,7 @@ def cmd_list_pending(_args: argparse.Namespace) -> None:
     pending_cases = case_store.list_cases(pending_human_review=True)
     for case in pending_cases:
         print(f"""Case Id: {case['case_id']}, Entity Name: {case['entity_name']}, 
-        Risk Case: {case['risk_score']}, Recommended Action: {case['recommended_action']}""")
+        Risk Score: {case['risk_score']}, Recommended Action: {case['recommended_action']}""")
 
 
 def main() -> None:

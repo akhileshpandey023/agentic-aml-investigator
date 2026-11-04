@@ -10,3 +10,5 @@ data/processed/**
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+.deepeval/
+.deepeval_telemetry.txt

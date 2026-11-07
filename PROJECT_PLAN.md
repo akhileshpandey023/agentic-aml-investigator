@@ -706,6 +706,13 @@ uv run python -m aml_agents.main resume --case-id <id> --decision confirm --revi
 
 ## Phase 11 — Evaluation harness (~1.5 days)
 
+**Evaluation now uses the `deepeval` package.** Read `EVAL_PLAN.md` first: it
+sets out the three evaluation levels, which metrics are deterministic and
+which are LLM-judged, how to calibrate the judge, and the order to adopt it
+in. deepeval scores the cases; `eval_store.py` (SQLite) remains the system of
+record. Install with `uv sync --extra eval`. The requirements below are
+updated to match; where they conflict with older wording, these win.
+
 ### Requirements: `aml_agents/evaluation/test_cases.py`
 
 - Populate `KNOWN_SANCTIONED` with 5-10 `GoldenCase` entries sampled from
@@ -771,22 +778,31 @@ case resumes an old checkpoint. Only `eval_results.sqlite` should persist.
 For `entity_resolution_node`-only runs (the acceptance script below) this
 doesn't apply, since no graph runs.
 
-**`critic_catch_rate` / `retrieval_faithfulness`** — stretch (Phase 13);
-leave as `NotImplementedError` unless you want to build them now. The
-broken `RiskMemo` example you built for Phase 8's manual testing is exactly
-the input `critic_catch_rate` needs — build a small list of 3-5 such
-examples with known issues and measure what fraction the critic actually
-flags.
+**deepeval layer** (`deepeval_metrics.py`, `adapters.py`, `judge.py`,
+`runner.py`, `run_eval.py`, `critic_cases.py`)
+- `adapters.to_test_case` turns a `CaseState` into an `LLMTestCase`: memo
+  narrative as `actual_output`, the evidence the analyst saw as
+  `retrieval_context`, plain facts in `metadata`.
+- Deterministic `BaseMetric`s: Entity Resolution Match, Escalation Routing,
+  Citation Validity, Policy Consistency, Critic Verdict Match. LLM-judged:
+  `FaithfulnessMetric` and two `GEval` metrics, behind `--judge`.
+- `judge.LLMClientJudge` lets any `LLMClient` act as the judge. Set
+  `EVAL_JUDGE_BACKEND` so the judge is not the model under test.
+- `metrics.critic_rates` (catch rate and false-positive rate) and
+  `metrics.summarise_scores` replace the old `critic_catch_rate` and
+  `retrieval_faithfulness` stubs; faithfulness is deepeval's metric.
+- New `eval_case_scores` table (one row per case and metric) and
+  `eval_store.save_case_scores`.
 
-**Acceptance criteria:** no dedicated test file — write a short script (or
-a notebook cell) that runs `entity_resolution_node` over `all_cases()` from
-`test_cases.py`, feeds the results into `entity_resolution_accuracy` and
-`latency_by_node`, and stores everything with `eval_store` (`start_run`,
-`save_results`, `save_metric`). Sanity-check the numbers look right given
-what you know about your golden set (e.g. `KNOWN_SANCTIONED` should score
-very high recall if `ENTITY_MATCH_MIN_SCORE` is reasonable). Then change
-`ENTITY_MATCH_MIN_SCORE`, run again, and confirm `compare_runs` shows the
-metric movement between the two runs.
+**Acceptance criteria:** `tests/test_eval_deepeval.py` passes offline (it uses
+stub nodes and a stub judge). Then, with real data:
+`uv run python -m aml_agents.evaluation.run_eval run --level entity`.
+Sanity-check the numbers against what you know about your golden set (e.g.
+`KNOWN_SANCTIONED` should score very high recall if `ENTITY_MATCH_MIN_SCORE`
+is reasonable). Change `ENTITY_MATCH_MIN_SCORE`, run again, and confirm
+`run_eval compare <run_a> <run_b>` shows the metric movement. A run where
+every case fails to run prints a warning instead of a believable-looking
+score; if you see it, fix the cause (usually missing data) first.
 
 **Note on CSV:** the OpenSanctions files in `data/raw/sanctions/` stay CSV
 because that is the format the source publishes and Phase 2's
@@ -836,6 +852,7 @@ Pick any:
 - **Second, adversarial critic:** add a differently-prompted second critic
   (multi-agent debate) and compare its catch rate against the single-critic
   setup from Phase 8, using `critic_catch_rate`.
-- **`retrieval_faithfulness`:** port your existing RAGAS-based evaluation
-  from the compliance Q&A assistant to this project's `RetrievedPassage`/
-  `RiskMemo` schemas.
+- **Retrieval metrics:** add deepeval's `ContextualRelevancyMetric` and
+  `ContextualRecallMetric` for the retrieval node, using hand-written
+  expected passages per golden case. (Faithfulness of the memo to its
+  evidence is already covered in Phase 11.)

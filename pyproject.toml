@@ -28,7 +28,7 @@ dev = [
 ]
 [project.optional-dependencies]
 eval = [
-    "ragas>=0.1",
+    "deepeval>=4.3,<5",
 ]
 
 [build-system]

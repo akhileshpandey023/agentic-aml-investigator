@@ -44,7 +44,7 @@ def planner_node(state: CaseState) -> dict:
     return {
         'plan': static_plan, 
         **make_trace(
-            node_name='planner_node',
+            node_name='planner',
             summary_in=state['entity_name'],
             summary_out=(
                 f"Steps created in teh plan: {static_plan.steps}"

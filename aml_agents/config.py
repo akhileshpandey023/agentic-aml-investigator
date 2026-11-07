@@ -60,3 +60,14 @@ CRITIC_MIN_CONFIDENCE = 0.6  # below this, escalate to human regardless of risk 
 
 # --- Misc ---
 RANDOM_SEED = 13
+
+# --- Evaluation (Phase 11, deepeval) ---
+# The judge model grades LLM-reasoning outputs (faithfulness, G-Eval). Keep it
+# separate from the pipeline's own backend: a 7B local model grading its own
+# output is a weak signal. "same" reuses LLM_BACKEND / its model settings.
+EVAL_JUDGE_BACKEND = os.getenv("EVAL_JUDGE_BACKEND", "same")  # "same" | "anthropic" | "local"
+EVAL_JUDGE_MODEL = os.getenv("EVAL_JUDGE_MODEL", "")  # empty -> that backend's default model
+EVAL_JUDGE_MAX_TOKENS = int(os.getenv("EVAL_JUDGE_MAX_TOKENS", "2048"))
+EVAL_FAITHFULNESS_THRESHOLD = 0.8
+EVAL_GEVAL_THRESHOLD = 0.7
+

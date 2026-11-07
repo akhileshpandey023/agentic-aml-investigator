@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import time
 from pydantic import ValidationError
+import re
 
 from aml_agents.schemas import CaseState, RiskMemo, make_trace
 from aml_agents.prompts import RISK_ANALYST_PROMPT
@@ -84,10 +85,15 @@ def risk_analyst_node(state: CaseState) -> dict:
     current_system_prompt = RISK_ANALYST_PROMPT
     attempt = 1
     max_attempts = 3
-    while attempt < max_attempts:
+    while attempt <= max_attempts:
         try:
             llm_response = get_llm_client().complete(system=current_system_prompt, user=evidence_found)
-            risk_memo = _parse_risk_memo(llm_response.text, state['entity_name']) 
+            match = re.search(r'```(?:json)?\s*(.*?)\s*```', llm_response.text, flags=re.DOTALL)
+            if match:
+                json_content = match.group(1).strip()   
+            else:
+                json_content = llm_response.text.strip()
+            risk_memo = _parse_risk_memo(json_content, state['entity_name']) 
             break
         except (json.JSONDecodeError, ValidationError) as e:
             if attempt == max_attempts:

@@ -16,6 +16,7 @@ reads it. See ARCHITECTURE.md design principle 3.
 from __future__ import annotations
 import json
 import time
+import re
 
 from aml_agents.schemas import CaseState, CriticReview, make_trace
 from aml_agents.llm_client import get_llm_client
@@ -80,13 +81,18 @@ def critic_node(state: CaseState) -> dict:
     start_time = time.perf_counter()
     cr_context = _format_review_context(state)
     llm_response = get_llm_client().complete(system=CRITIC_PROMPT, user=cr_context)
-    parsed_review = _parse_critic_review(llm_response.text)
+    match = re.search(r'```(?:json)?\s*(.*?)\s*```', llm_response.text, flags=re.DOTALL)
+    if match:
+        json_content = match.group(1).strip()   
+    else:
+        json_content = llm_response.text.strip()
+    parsed_review = _parse_critic_review(json_content)
     end_time = time.perf_counter()
 
     return {"critic_feedback": parsed_review, 
             **make_trace(
-                node_name='risk_analyst',
-                summary_in=f"{state}",
+                node_name='critic',
+                summary_in=f"{state['critic_feedback']}",
                 token_usage={'input_token': int(llm_response.input_tokens), 'output_token': int(llm_response.output_tokens)}, # type: ignore
                 summary_out=f"{parsed_review}",
                             duration_ms=(end_time-start_time)*1000

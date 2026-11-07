@@ -43,7 +43,7 @@ def human_gate_node(state: CaseState) -> dict:
     return {"risk_memo": updated_memo, 
             "human_review_required": True, 
             **make_trace(node_name='human_gate',
-                         summary_in="decision={decision.decision!r} by {decision.reviewer!r}",
+                         summary_in=f"decision={state['human_decision'].decision!r} by {state['human_decision'].reviewer!r}",
                          summary_out=f"final recommended_action={updated_memo.recommended_action if updated_memo else None}",
                          duration_ms=(end_time-start_time)*1000
                          ),

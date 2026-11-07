@@ -17,7 +17,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 from typing import Literal
 from langgraph.prebuilt import ToolNode
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.memory import MemorySaver, InMemorySaver
 
 from aml_agents import config
 from aml_agents.nodes.adverse_media import adverse_media_node
@@ -152,10 +152,8 @@ def build_graph(checkpointer=None):
     aml_investigator_graph_builder.add_edge("mark_human_review_required", "human_gate")
     aml_investigator_graph_builder.add_edge("human_gate", END)
 
-    if checkpointer is None:
-        aml_investigator_graph = aml_investigator_graph_builder.compile()
-    else:
-        aml_investigator_graph = aml_investigator_graph_builder.compile(checkpointer=checkpointer, 
-                                                                        interrupt_before=["human_gate"])
+    active_checkpointer = checkpointer if checkpointer is not None else InMemorySaver()
+
+    aml_investigator_graph = aml_investigator_graph_builder.compile(checkpointer=active_checkpointer)
 
     return aml_investigator_graph

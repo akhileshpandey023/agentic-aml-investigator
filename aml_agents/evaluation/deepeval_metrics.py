@@ -88,7 +88,7 @@ class _DeterministicMetric(BaseMetric):
             self.score, self.reason = 0.0, f"run failed: {md['error']}"
         else:
             self.score, self.reason = self._check(md)
-        self.success = self.score >= self.threshold
+        self.success = self.score >= self.threshold # type: ignore
         return self.score
 
     async def a_measure(self, test_case: LLMTestCase, *args: Any, **kwargs: Any) -> float:

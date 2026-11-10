@@ -77,13 +77,13 @@ def _extract_json_text(raw_text: str) -> str:
 
 
 def _parse_risk_memo(raw_text: str, entity_name: str) -> RiskMemo:
-    """json.loads raw_text, default entity_name, RiskMemo.model_validate.
+    """json.loads raw_text, set entity_name from the case, RiskMemo.model_validate.
     json.JSONDecodeError / pydantic.ValidationError propagate; the node
     decides whether to retry.
     """
 
     payload = json.loads(_extract_json_text(raw_text))
-    payload.setdefault("entity_name", entity_name)
+    payload["entity_name"] = entity_name  # the case decides who the memo is about, not the model
     return RiskMemo.model_validate(payload)
 
 

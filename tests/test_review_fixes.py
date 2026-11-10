@@ -146,3 +146,8 @@ def test_local_client_uses_openai_endpoint(monkeypatch):
         resp = LocalOpenAICompatLLMClient(base, "m").complete("s", "u")
         assert seen["url"] == "http://h:1/v1/chat/completions" and seen["timeout"]
         assert (resp.text, resp.input_tokens, resp.output_tokens) == ("hi", 3, 2)
+
+
+def test_memo_entity_name_comes_from_case():
+    memo = risk_analyst._parse_risk_memo(_memo(10).model_dump_json(), "Real Name")
+    assert memo.entity_name == "Real Name"

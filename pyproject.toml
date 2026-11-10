@@ -2,7 +2,7 @@
 name = "agentic-aml-investigator"
 version = "0.1.0"
 description = "Practice project: multi-agent AML case investigation assistant on public data"
-requires-python = ">=3.11,<3.14"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "langgraph>=0.2.0",
     "langgraph-checkpoint-sqlite>=2.0",

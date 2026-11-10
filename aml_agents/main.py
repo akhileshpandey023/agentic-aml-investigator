@@ -4,9 +4,6 @@
     uv run python -m aml_agents.main resume --case-id <id> --decision confirm --reviewer "you"
     uv run python -m aml_agents.main list-pending
 
-The argparse wiring in main() is GIVEN (plain CLI boilerplate). The command
-functions and _get_checkpointer are PLACEHOLDERS — see PROJECT_PLAN.md
-Phase 10, section "main.py".
 """
 
 from __future__ import annotations
@@ -15,6 +12,7 @@ import argparse
 import sys
 import json 
 
+from aml_agents.checkpointing import make_serde
 from aml_agents.graph import build_graph
 from aml_agents.memory import case_store
 from aml_agents.schemas import HumanDecision, new_case_state
@@ -30,49 +28,59 @@ def _get_checkpointer() -> SqliteSaver:
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
-    checkpointer = SqliteSaver(conn)
+    checkpointer = SqliteSaver(conn, serde=make_serde())
     checkpointer.setup()
     return checkpointer
 
 
 def cmd_investigate(args: argparse.Namespace) -> None:
-    """TODO: build the graph with a real checkpointer, build a fresh
-    CaseState via new_case_state(entity_name=args.entity), invoke the graph
-    with a thread_id config keyed on the case_id, save the result via
-    case_store.save_case, and print either the risk memo or the trace (if
-    the run paused before producing one). See PROJECT_PLAN.md Phase 10.
-    """
+    """Run a new investigation; save the case; print the memo, or say the case
+    is waiting for a human and why."""
 
     app = build_graph(checkpointer=_get_checkpointer())
     state = new_case_state(entity_name=args.entity)
     run_config = {"configurable": {"thread_id": state["case_id"]}}
-    result = app.invoke(state, config=run_config) # type: ignore
-    case_store.save_case(result) # type: ignore
+    app.invoke(state, config=run_config)  # type: ignore
+    snapshot = app.get_state(run_config)  # type: ignore
+    result = dict(snapshot.values)
+    case_store.save_case(result)  # type: ignore
 
     print(f"case_id: {result['case_id']}")
-    if result.get("risk_memo"):
-        print(json.dumps(result["risk_memo"].model_dump(), indent=2))
-    else:
-        print("(paused before human_gate, or no memo produced — inspect the trace)")
+    memo = result.get("risk_memo")
+    if snapshot.next:
+        print(f"PAUSED: awaiting human review before {', '.join(snapshot.next)}.")
+        for t in result.get("trace", []):
+            if t.node_name == "mark_human_review_required":
+                print(f"  {t.summary_out}")
+        print(
+            f"  Resume with: python -m aml_agents.main resume --case-id {result['case_id']} "
+            "--decision confirm|override_clear|override_escalate --reviewer NAME"
+        )
+    if memo:
+        print(json.dumps(memo.model_dump(), indent=2))
+    elif not snapshot.next:
+        print("No memo was produced; trace:")
         for t in result.get("trace", []):
             print(f"  [{t.node_name}] {t.summary_out}")
 
 
 def cmd_resume(args: argparse.Namespace) -> None:
-    """TODO: build the graph with the same checkpointer/thread_id as the
-    original run, build a HumanDecision from args, call
-    app.update_state(...) to record it, then app.invoke(None, config=...) to
-    resume execution past human_gate, save the result, and print the memo.
-    """
+    """Record a human decision on a paused case, resume past human_gate, save
+    and print the result. Fails clearly if the case is unknown or not waiting."""
 
     app = build_graph(checkpointer=_get_checkpointer())
     run_config = {"configurable": {"thread_id": args.case_id}}
-    human_decision = HumanDecision(decision= args.decision, reviewer= args.reviewer, notes= args.notes)
+    snapshot = app.get_state(run_config)  # type: ignore
+    if not snapshot.values:
+        sys.exit(f"No checkpointed case with id {args.case_id!r}.")
+    if tuple(snapshot.next) != ("human_gate",):
+        sys.exit(f"Case {args.case_id} is not waiting for human review (next steps: {list(snapshot.next) or 'none, already finished'}).")
 
-    app.update_state(run_config, {"human_decision": human_decision}) # type: ignore
-    result = app.invoke(None, config=run_config) # type: ignore
-
-    case_store.save_case(result) # type: ignore
+    human_decision = HumanDecision(decision=args.decision, reviewer=args.reviewer, notes=args.notes)
+    app.update_state(run_config, {"human_decision": human_decision})  # type: ignore
+    app.invoke(None, config=run_config)  # type: ignore
+    result = dict(app.get_state(run_config).values)  # type: ignore
+    case_store.save_case(result)  # type: ignore
 
     print(json.dumps(result["risk_memo"].model_dump(), indent=2))
 

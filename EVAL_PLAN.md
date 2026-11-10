@@ -136,7 +136,7 @@ data makes every entity case fail).
 6. **Lock in.** Record floors from the stable baseline and decide which metrics
    gate. Optionally run `e2e` in CI on a small subset with a stub or API judge.
 
-Phase 13 comparisons (dynamic planner, local-hardware model, second critic)
+Phase 14 comparisons (dynamic planner, local-hardware model, second critic)
 are the same two commands: run the baseline, change one thing, `compare`.
 
 ## 8. What the metrics should expose in the current code

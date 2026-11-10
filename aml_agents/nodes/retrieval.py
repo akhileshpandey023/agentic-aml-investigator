@@ -47,10 +47,16 @@ def retrieval_node(state: CaseState) -> dict:
     start_time = time.perf_counter()
     query = _build_query(state)
     
+    # Only "corpus not ingested yet" degrades to no passages. Any other failure
+    # (a corrupt store, a model that cannot load) must fail the run: swallowing
+    # it would tell the Risk Analyst "no guidance found" when the truth is that
+    # the retrieval step broke.
+    note = ""
     try:
         passages = _get_store().query(query)
-    except Exception as e:
+    except FileNotFoundError as exc:
         passages = []
+        note = f" (guidance corpus unavailable: {exc})"
 
     end_time = time.perf_counter()
     
@@ -58,7 +64,7 @@ def retrieval_node(state: CaseState) -> dict:
             **make_trace(
                 node_name='retrieval',
                 summary_in=f"query={query!r}",
-                summary_out=f"{len(passages)} passage(s) after rerank",
+                summary_out=f"{len(passages)} passage(s) after rerank{note}",
                 duration_ms=(end_time-start_time)*1000
                 ),
                 }

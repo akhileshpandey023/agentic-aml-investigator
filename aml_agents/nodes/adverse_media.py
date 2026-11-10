@@ -34,7 +34,7 @@ def adverse_media_node(state: CaseState) -> dict:
     return {
         'adverse_media_findings': subset_result,
         **make_trace(
-            node_name='adverse_media_search',
+            node_name='adverse_media',
             summary_in=state['entity_name'],
             summary_out=(
                 f"{len(adversial_media_result)} candidate(s) found in adverse media search of which kept {len(subset_result)} results"

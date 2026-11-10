@@ -25,6 +25,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 LOCAL_LLM_BASE_URL = os.getenv("LOCAL_LLM_BASE_URL", "http://localhost:11434/")
 LOCAL_LLM_MODEL = os.getenv("LOCAL_LLM_MODEL", "qwen2.5:7b")
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS", "120"))  # per request; a hung endpoint must not hang a case
 
 # --- Data paths ---
 SANCTIONS_DIR = REPO_ROOT / "data" / "raw" / "sanctions"
@@ -47,16 +48,30 @@ ENTITY_MATCH_TOP_K = 5
 RETRIEVAL_TOP_K = 8
 RETRIEVAL_RERANK_TOP_K = 4  # after cross-encoder rerank, how many passages to keep
 CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# NOT currently used: VectorStore relies on Chroma's default embedding function.
+# Wiring this in changes every embedding, so it needs a re-ingest into a
+# differently named collection; do that deliberately, not by accident.
 EMBEDDING_MODEL = "Qwen/Qwen3-Embedding-4B"
 
 # --- Adverse media ---
 ADVERSE_MEDIA_TOP_K = 5
 ADVERSE_MEDIA_RELEVANCE_SCORE = 0.15
+# Share of the entity name's distinctive tokens that must appear in a notice
+# for it to count as a hit. BM25 scores are normalised to the best document in
+# the batch, so without this the top document always scores 1.0 even when it
+# shares a single word with the name.
+ADVERSE_MEDIA_MIN_TOKEN_COVERAGE = 1.0
 
 # --- Risk / reflection loop ---
 MAX_REVISIONS = 2  # bound on the critic -> risk_analyst loop
 RISK_ESCALATION_THRESHOLD = 70  # risk_score (0-100) at or above which human_gate is required
 CRITIC_MIN_CONFIDENCE = 0.6  # below this, escalate to human regardless of risk score
+# A sanctions candidate at or above this match score is treated as a confirmed
+# match: risk_score is floored at SANCTIONS_RISK_FLOOR and the case always goes
+# to a human, whatever risk_score the LLM chose. Both are enforced in code
+# (policy.py, graph.route_after_critic) and quoted in the prompts.
+SANCTIONS_CONFIRMED_MATCH_SCORE = 90
+SANCTIONS_RISK_FLOOR = 70
 
 # --- Misc ---
 RANDOM_SEED = 13

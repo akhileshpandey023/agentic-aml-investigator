@@ -112,7 +112,7 @@ flowchart TD
    `llm_client.py` is the only file that knows whether you're calling the
    Anthropic API or a local model. No node should import a provider SDK
    directly — this is what lets you A/B a local model against the API on
-   the same graph (PROJECT_PLAN.md Phase 13).
+   the same graph (PROJECT_PLAN.md Phase 14).
 
 ## Observability
 

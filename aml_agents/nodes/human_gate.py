@@ -15,36 +15,46 @@ from aml_agents.schemas import CaseState, make_trace
 
 
 def human_gate_node(state: CaseState) -> dict:
-    """TODO: read state["human_decision"] (raise RuntimeError with a clear
-    message if it's None — see PROJECT_PLAN.md Phase 9 for why that
-    shouldn't normally happen), apply override_clear/override_escalate to
-    risk_memo.recommended_action via model_copy(update=...) (leave it alone
-    on "confirm"), and return
-    {"risk_memo": ..., "human_review_required": True, **make_trace(...)}.
+    """Apply the reviewer's decision to the memo and record it.
+
+    Runs only after a decision has been recorded: the graph pauses before this
+    node (interrupt_before in graph.py), and main.cmd_resume writes
+    `human_decision` before resuming. Reaching it without one is a wiring bug,
+    so it raises rather than quietly passing the case through.
+
+    An override changes `recommended_action`. The system's own assessment
+    (risk_score, risk_level) is left as it was, and the narrative records what
+    was overridden and by whom, so the memo never reads as if the system had
+    reached the reviewer's conclusion itself.
     """
 
     start_time = time.perf_counter()
-    memo = state['risk_memo']
-    if state['human_decision'] is None:
+    decision = state.get("human_decision")
+    if decision is None:
         raise RuntimeError(
-            "human_gate_node reached without a recorded human_decision — the graph "
-            "should have paused before this node ran. Check the interrupt_before "
-            "wiring in graph.py."
+            "human_gate_node reached without a recorded human_decision; the graph "
+            "should have paused before this node ran. Check interrupt_before in graph.py."
         )
+
+    memo = state.get("risk_memo")
     updated_memo = memo
-    if state['risk_memo']:
-        if state['human_decision'].decision == 'override_clear':
-            updated_memo = state['risk_memo'].model_copy(update={'recommended_action':'clear'})
-        elif state['human_decision'].decision=='override_escalate':
-            updated_memo = state['risk_memo'].model_copy(update={'recommended_action':'escalate'})
-    
-    end_time = time.perf_counter()
-    
-    return {"risk_memo": updated_memo, 
-            "human_review_required": True, 
-            **make_trace(node_name='human_gate',
-                         summary_in=f"decision={state['human_decision'].decision!r} by {state['human_decision'].reviewer!r}",
-                         summary_out=f"final recommended_action={updated_memo.recommended_action if updated_memo else None}",
-                         duration_ms=(end_time-start_time)*1000
-                         ),
-                         }
+    if memo is not None and decision.decision in ("override_clear", "override_escalate"):
+        action = "clear" if decision.decision == "override_clear" else "escalate"
+        note = (
+            f"[Human review by {decision.reviewer}: {decision.decision}. The system had recommended "
+            f"{memo.recommended_action!r} at risk_score {memo.risk_score}."
+            + (f" Reviewer notes: {decision.notes}" if getattr(decision, "notes", "") else "")
+            + "] "
+        )
+        updated_memo = memo.model_copy(update={"recommended_action": action, "narrative": note + memo.narrative})
+
+    return {
+        "risk_memo": updated_memo,
+        "human_review_required": True,
+        **make_trace(
+            node_name="human_gate",
+            summary_in=f"decision={decision.decision!r} by {decision.reviewer!r}",
+            summary_out=f"final recommended_action={updated_memo.recommended_action if updated_memo else None}",
+            duration_ms=(time.perf_counter() - start_time) * 1000,
+        ),
+    }

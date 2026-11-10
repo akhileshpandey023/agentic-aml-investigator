@@ -107,7 +107,7 @@ given decorator — keep it)
   reasonably (e.g. "Vostok Trading" vs "Trading, Vostok LLC") — don't
   pre-normalise the name yourself beyond what the library already does, or
   you'll fight it. Transliteration/diacritic normalisation is explicitly
-  out of scope for this phase (see Phase 13 stretch).
+  out of scope for this phase (see Phase 14 stretch).
 
 ### Requirements: `aml_agents/nodes/entity_resolution.py`
 
@@ -295,7 +295,7 @@ values and descending `score`.
   your own notes (or just leave a comment) that an LLM-based relevance
   check (does this hit actually concern the *same* entity, not a namesake?)
   is a stronger version of this step; implementing that upgrade is optional
-  and listed in Phase 13.
+  and listed in Phase 14.
 - R3: Return `{"adverse_media_findings": filtered, **make_trace(...)}`,
   with `summary_out` noting `kept/total` hits.
 
@@ -368,7 +368,7 @@ or a running local server — test that manually with
 - R1: Call `build_static_plan`, time it, return
   `{"plan": ..., **make_trace(...)}` with `summary_out` listing the steps.
 
-`build_dynamic_plan` is Phase 13 (stretch) — leave it raising
+`build_dynamic_plan` is Phase 14 (stretch) — leave it raising
 `NotImplementedError`; it's not called by `planner_node` by default.
 
 **Acceptance criteria:** no automated test — manually verify
@@ -831,7 +831,162 @@ what you built, not just in principle.
 
 ---
 
-## Phase 13 (stretch) — Beyond the required scaffolding
+## Phase 13 — Deploy with Docker and serve over an API (~1–1.5 days)
+
+Goal: run the investigator as a container and drive it with HTTP calls
+instead of the CLI, including the human-review pause and resume.
+
+**Read `DEPLOYMENT_GUIDE.md` first.** It covers the Docker mental model, a
+warm-up, an annotated Dockerfile and compose file, what to inspect, a
+troubleshooting table, how each step maps to an enterprise setup (registry,
+CI/CD, secrets, Kubernetes, Postgres, audit and model-risk concerns), and a
+six-level exercise ladder. The steps below are the checklist; the guide is the explanation.
+
+### Step 1 — One service layer for CLI and API
+
+Move the logic in `main.cmd_investigate` / `cmd_resume` into
+`aml_agents/service.py` so the CLI and the API call the same code:
+
+- `start_investigation(app, entity_name) -> dict`: builds the state, invokes
+  the graph with `thread_id = case_id`, reads the final snapshot with
+  `app.get_state`, saves the case, returns
+  `{case_id, status, risk_memo, review_reasons, trace}`.
+  `status` is `"awaiting_review"` if `snapshot.next` is non-empty, else `"completed"`.
+- `resume_investigation(app, case_id, decision, reviewer, notes) -> dict`: the
+  same checks `cmd_resume` makes (unknown case, case not waiting) but raising
+  `CaseNotFound` / `CaseNotPending` exceptions instead of calling `sys.exit`.
+- `main.py` becomes a thin wrapper: call the service, print, map exceptions to exit messages.
+
+### Step 2 — API: `aml_agents/api.py` (FastAPI)
+
+Add `fastapi` and `uvicorn[standard]` to `pyproject.toml` and refresh `uv.lock`.
+Build the graph **once** at startup (FastAPI `lifespan`) with the SQLite
+checkpointer from `main._get_checkpointer()`; do not build it per request.
+Use plain `def` endpoints (the graph call blocks, FastAPI runs them in a thread pool).
+
+| Method and path | Purpose | Success | Errors |
+|---|---|---|---|
+| `GET /health` | liveness; also checks the case store opens | 200 `{"status":"ok"}` | 503 |
+| `POST /investigations` body `{"entity_name": "..."}` | run an investigation | 200 result from `start_investigation` | 422 empty name, 502 LLM backend unreachable |
+| `GET /investigations/{case_id}` | read a saved case (memo, status, trace) | 200 | 404 |
+| `GET /investigations?pending=true` | cases waiting for a human | 200 list | |
+| `POST /investigations/{case_id}/decision` body `{"decision": "confirm\|override_clear\|override_escalate", "reviewer": "...", "notes": ""}` | resume a paused case | 200 final result | 404 unknown, 409 not waiting for review |
+
+Request and response bodies are Pydantic models (reuse `RiskMemo` and
+`HumanDecision`; do not hand-write parallel dicts). Open `/docs` in a
+browser once it runs: FastAPI generates the interactive spec from them.
+
+Constraint to understand, not work around: SQLite plus the in-process graph
+means **one uvicorn worker** (`--workers 1`). Write down in the README why
+more workers or replicas would need Postgres (or another shared store) for
+the case store and checkpoints.
+
+### Step 3 — Dockerfile and `.dockerignore`
+
+- Base `python:3.12-slim`. Install `uv`, copy `pyproject.toml` and `uv.lock`
+  first, run `uv sync --frozen --no-dev`, and only then copy `aml_agents/`
+  (so code changes don't invalidate the dependency layer).
+- Run as a non-root user. `EXPOSE 8000`.
+  `CMD ["uv","run","--no-sync","uvicorn","aml_agents.api:app","--host","0.0.0.0","--port","8000","--workers","1"]`.
+- `.dockerignore`: `.venv`, `.git`, `data/`, `.env`, `__pycache__`, `notebooks/`, `tests/`.
+- Do **not** bake in data, `.env` or API keys. Data arrives through a volume
+  and secrets through environment variables at run time.
+- `sentence-transformers` pulls in PyTorch, which makes the image large.
+  Build it once, run `docker images`, and note the size. Then try the CPU-only
+  PyTorch index to shrink it and record the difference.
+- Chroma's default embedding model is downloaded on first use. Either run
+  one warm-up call at build time, or mount a cache volume, so the first
+  request in a fresh container does not stall on a download.
+
+### Step 4 — `docker-compose.yml`
+
+- Service `api`: `build: .`, `ports: ["8000:8000"]`, `env_file: .env`,
+  and environment overrides pointing every path at the volume:
+  `CASE_STORE_DB_PATH`, `LANGGRAPH_CHECKPOINT_DB_PATH`, `VECTOR_STORE_DIR`
+  under `/app/data/processed`, `EVAL_DB_PATH` likewise.
+- Volume: bind-mount `./data:/app/data` so downloaded data, the vector
+  store, the case store and the checkpoints survive container restarts.
+- `healthcheck` calling `/health`, and `restart: unless-stopped`.
+- LLM backend, pick one:
+  - Anthropic: `LLM_BACKEND=anthropic` and `ANTHROPIC_API_KEY` in `.env`.
+  - Ollama on your machine: `LLM_BACKEND=local` and
+    `LOCAL_LLM_BASE_URL=http://host.docker.internal:11434`. On Linux add
+    `extra_hosts: ["host.docker.internal:host-gateway"]`. Inside a
+    container `localhost` is the container itself, which is the usual reason
+    this fails.
+  - Optional: an `ollama` service behind a compose `profiles: ["local-llm"]`
+    entry, with a volume for models.
+- One-off jobs use the same image rather than a second one:
+  `docker compose run --rm api python scripts/download_public_data.py --all`
+  and `docker compose run --rm api python scripts/ingest_guidance.py`.
+
+### Step 5 — Run it and call it
+
+```bash
+docker compose build
+docker compose run --rm api python scripts/download_public_data.py --all
+docker compose run --rm api python scripts/ingest_guidance.py
+docker compose up -d
+curl localhost:8000/health
+
+# 1. start an investigation
+curl -s -X POST localhost:8000/investigations \
+  -H 'content-type: application/json' -d '{"entity_name": "Some Entity Name"}'
+# -> status "completed", or "awaiting_review" with a case_id and review_reasons
+
+# 2. list cases waiting for a human, then decide on one
+curl -s 'localhost:8000/investigations?pending=true'
+curl -s -X POST localhost:8000/investigations/<case_id>/decision \
+  -H 'content-type: application/json' \
+  -d '{"decision": "confirm", "reviewer": "you", "notes": "checked list entry"}'
+
+# 3. read the final case
+curl -s localhost:8000/investigations/<case_id>
+```
+
+### Tests: `tests/test_api.py` (write it; `fastapi.testclient.TestClient`)
+
+Inject a graph built with a fake LLM client and a temporary database, so
+nothing needs Docker, a network or an API key:
+
+- `/health` returns 200.
+- A low-risk entity returns `completed` with a memo.
+- A high-risk entity returns `awaiting_review`, appears in `?pending=true`,
+  and after `POST .../decision` returns `completed`.
+- Decision on an unknown case is 404; on an already finished case is 409.
+- Empty `entity_name` is 422.
+
+### Acceptance criteria
+
+1. `docker compose up -d` brings the service to `healthy` from a clean clone
+   plus `.env` and the one-off data jobs.
+2. The curl sequence above works end to end, including a pause and resume.
+3. `docker compose restart api` (and `down` then `up`) keeps a paused case:
+   it still appears under `?pending=true` and can be resumed. This is the
+   check that the checkpointer and case store really live in the volume.
+4. `docker history` / `docker images`: the image holds no `.env`, no API key and no `data/`.
+5. `docker compose exec api id` shows a non-root user.
+6. `pytest tests/test_api.py` passes without Docker.
+
+### Exercises
+
+- Change one line in `aml_agents/` and rebuild: confirm only the last layers rebuild.
+- Stop the Ollama or Anthropic backend and call `POST /investigations`: you should get a clear 502, not a hung request or a stack trace.
+- A real investigation can take minutes on a local model. Make
+  `POST /investigations` return `202` with a `case_id` immediately and run
+  the graph in a background task, with `GET /investigations/{id}` showing
+  `status: "running"`. Decide what happens to a run that was in progress when the container restarts.
+- Add a simple `X-API-Key` header check, read from an environment variable.
+
+**Learning objective:** an agent that works from a terminal is not yet a
+service. Packaging, configuration through the environment, persistence
+outside the container, network addressing between containers and the host,
+and a request/response shape for a workflow that can pause for a human
+are separate problems, and this phase makes you solve each one.
+
+---
+
+## Phase 14 (stretch) — Beyond the required scaffolding
 
 Pick any:
 

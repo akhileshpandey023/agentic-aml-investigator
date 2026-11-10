@@ -3,7 +3,7 @@
 TOOL_SCHEMAS and TOOL_DISPATCH below are GIVEN (declarative data, not logic).
 Not used by the default graph — see ARCHITECTURE.md: the default design has
 the *graph* decide which tool each node calls, not the LLM. This exists for
-the Phase 13 stretch exercise, detailed in PROJECT_PLAN.md: give an LLM this
+the Phase 14 stretch exercise, detailed in PROJECT_PLAN.md: give an LLM this
 tool list and let it decide which to call and in what order, then compare
 its behaviour against the fixed pipeline on your golden set.
 """
@@ -48,7 +48,7 @@ TOOL_DISPATCH: dict[str, Callable[..., Any]] = {
 
 
 def run_tool_calling_agent(task: str, *, max_turns: int = 6) -> str:
-    """TODO (Phase 13, stretch — see PROJECT_PLAN.md): implement a multi-turn
+    """TODO (Phase 14, stretch — see PROJECT_PLAN.md): implement a multi-turn
     tool-calling loop:
         1. Start messages = [{"role": "user", "content": task}]
         2. Call the Anthropic API with tools=TOOL_SCHEMAS
@@ -60,4 +60,4 @@ def run_tool_calling_agent(task: str, *, max_turns: int = 6) -> str:
     is a separate, self-contained loop for the stretch exercise.
     """
 
-    raise NotImplementedError("run_tool_calling_agent is a Phase 13 stretch exercise")
+    raise NotImplementedError("run_tool_calling_agent is a Phase 14 stretch exercise")

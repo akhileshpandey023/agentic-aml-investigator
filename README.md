@@ -111,3 +111,7 @@ confidence, critic still revising) pauses there; `investigate` prints why, and
 `resume --case-id ...` records the decision. Scoring bands and the sanctions floor
 live in `aml_agents/policy.py` and are enforced in code, not left to the LLM.
 Note: `EMBEDDING_MODEL` in config is not used (Chroma's default embedder is).
+
+## Deployment
+
+PROJECT_PLAN.md Phase 13 covers running the investigator in Docker and calling it over an HTTP API.

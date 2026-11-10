@@ -1,7 +1,7 @@
 """Planner agent.
 
 PLACEHOLDER — see PROJECT_PLAN.md Phase 6, section "planner.py", for the
-static-plan requirements, and Phase 13 for the optional dynamic-plan
+static-plan requirements, and Phase 14 for the optional dynamic-plan
 stretch exercise.
 
 Reads:  state["entity_name"], state["original_query"]
@@ -24,13 +24,13 @@ def build_static_plan(state: CaseState) -> InvestigationPlan:
 
 
 def build_dynamic_plan(state: CaseState) -> InvestigationPlan:  
-    """TODO (Phase 13, stretch — see PROJECT_PLAN.md): have an LLM choose
+    """TODO (Phase 14, stretch — see PROJECT_PLAN.md): have an LLM choose
     `steps` from state["original_query"] alone, using the same
     "prompt + parse + validate" shape as risk_analyst_node. Not called by
     build_static_plan or planner_node by default.
     """
 
-    raise NotImplementedError("build_dynamic_plan is a Phase 13 stretch exercise")
+    raise NotImplementedError("build_dynamic_plan is a Phase 14 stretch exercise")
 
 
 def planner_node(state: CaseState) -> dict:

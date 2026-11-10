@@ -114,4 +114,4 @@ Note: `EMBEDDING_MODEL` in config is not used (Chroma's default embedder is).
 
 ## Deployment
 
-PROJECT_PLAN.md Phase 13 covers running the investigator in Docker and calling it over an HTTP API.
+PROJECT_PLAN.md Phase 13 covers running the investigator in Docker and calling it over an HTTP API; DEPLOYMENT_GUIDE.md explains it step by step and maps it to an enterprise setup.

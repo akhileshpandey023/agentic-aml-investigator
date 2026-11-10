@@ -836,6 +836,12 @@ what you built, not just in principle.
 Goal: run the investigator as a container and drive it with HTTP calls
 instead of the CLI, including the human-review pause and resume.
 
+**Read `DEPLOYMENT_GUIDE.md` first.** It covers the Docker mental model, a
+warm-up, an annotated Dockerfile and compose file, what to inspect, a
+troubleshooting table, how each step maps to an enterprise setup (registry,
+CI/CD, secrets, Kubernetes, Postgres, audit and model-risk concerns), and a
+six-level exercise ladder. The steps below are the checklist; the guide is the explanation.
+
 ### Step 1 — One service layer for CLI and API
 
 Move the logic in `main.cmd_investigate` / `cmd_resume` into

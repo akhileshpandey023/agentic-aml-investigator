@@ -1,11 +1,6 @@
 """The only module that should know which LLM backend is being used.
 
-PLACEHOLDER — see PROJECT_PLAN.md Phase 5 for detailed requirements.
-
-The interface (LLMClient, LLMResponse) and the factory function are given —
-they're the contract the rest of the codebase is written against. What's
-missing is each backend's `complete()` method: the actual request/response
-handling for the Anthropic SDK and for an OpenAI-compatible local endpoint.
+Backends: Anthropic SDK, and any OpenAI-compatible local endpoint.
 """
 
 from __future__ import annotations
@@ -39,68 +34,77 @@ class LLMClient(abc.ABC):
 
 
 class AnthropicLLMClient(LLMClient):
-    """PLACEHOLDER. See PROJECT_PLAN.md Phase 5, section "AnthropicLLMClient"."""
+    """Anthropic Messages API backend."""
 
     def __init__(self, api_key: str, model: str):
-        # TODO: validate api_key is non-empty (raise ValueError with a
-        # helpful message pointing at .env.example if it's missing), lazily
-        # import the `anthropic` package, construct an anthropic.Anthropic
-        # client, and store it + model on self for complete() to use.
-        raise NotImplementedError("AnthropicLLMClient.__init__: see PROJECT_PLAN.md Phase 5")
-
-    def complete(self, system: str, user: str, *, max_tokens: int = 1024, temperature: float = 0.0) -> LLMResponse:
-        # TODO: call self._client.messages.create(...), extract the text
-        # from the response's content blocks, and return an LLMResponse
-        # (including input/output token counts from the response's usage).
-        raise NotImplementedError("AnthropicLLMClient.complete: see PROJECT_PLAN.md Phase 5")
-
-
-class LocalOpenAICompatLLMClient(LLMClient):
-    """PLACEHOLDER. Talks to any OpenAI-compatible /v1/chat/completions
-    endpoint — e.g. Ollama or vLLM serving a model on your own hardware.
-    See PROJECT_PLAN.md Phase 5, section "LocalOpenAICompatLLMClient".
-    """
-
-    def __init__(self, base_url: str, model: str):
+        if not api_key or not api_key.strip():
+            raise ValueError("ANTHROPIC_API_KEY is not set. Copy .env.example to .env and fill it in.")
         if not model or not model.strip():
-            raise ValueError("No model name entered.")
-        
-        # Store properties, stripping trailing slash from the base URL
-        self._base_url = base_url.rstrip('/')
+            raise ValueError("ANTHROPIC_MODEL is not set. See .env.example.")
+        import anthropic  # lazy: only needed for this backend
+
+        self._client = anthropic.Anthropic(api_key=api_key, timeout=config.LLM_TIMEOUT_SECONDS)
         self._model = model.strip()
 
     def complete(self, system: str, user: str, *, max_tokens: int = 1024, temperature: float = 0.0) -> LLMResponse:
-        # TODO: POST to f"{self._base_url}/chat/completions" with a
-        # standard OpenAI-style chat payload, parse choices[0].message.content
-        # and the usage block, and return an LLMResponse.
+        response = self._client.messages.create(
+            model=self._model,
+            system=system,
+            messages=[{"role": "user", "content": user}],
+            max_tokens=max_tokens,
+            temperature=temperature,
+        )
+        text = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
+        usage = getattr(response, "usage", None)
+        return LLMResponse(
+            text=text,
+            input_tokens=getattr(usage, "input_tokens", None),
+            output_tokens=getattr(usage, "output_tokens", None),
+        )
+
+
+class LocalOpenAICompatLLMClient(LLMClient):
+    """Talks to an OpenAI-compatible /v1/chat/completions endpoint (Ollama,
+    vLLM, ...). `base_url` may be given with or without the /v1 suffix:
+    "http://localhost:11434", ".../" and ".../v1" all work."""
+
+    def __init__(self, base_url: str, model: str):
+        if not model or not model.strip():
+            raise ValueError("No local model name configured (LOCAL_LLM_MODEL).")
+        base = base_url.strip().rstrip("/")
+        if not base.endswith("/v1"):
+            base += "/v1"
+        self._base_url = base
+        self._model = model.strip()
+
+    def complete(self, system: str, user: str, *, max_tokens: int = 1024, temperature: float = 0.0) -> LLMResponse:
         payload = {
-            'model': self._model, 
-            'messages':[
-                {'role': 'system', 'content': system},
-                {'role': 'user', 'content': user}
-            ], 
-            'max_tokens': max_tokens, 
-            'temperature': temperature, 
-            "stream": False
+            "model": self._model,
+            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "stream": False,
         }
-        url = f'{self._base_url}/api/chat'
+        url = f"{self._base_url}/chat/completions"
         try:
-            response = requests.post(url, json=payload)
+            response = requests.post(url, json=payload, timeout=config.LLM_TIMEOUT_SECONDS)
             response.raise_for_status()
             data = response.json()
-        except requests.RequestException as e:
-            raise RuntimeError(f"Failed to connect to local LLM endpoint at {url}: {e}")
+        except (requests.RequestException, ValueError) as exc:
+            raise RuntimeError(f"Failed to get a completion from local LLM endpoint {url}: {exc}") from exc
 
-        # Parse text content
         try:
-            content = data["message"]["content"]
-        except (KeyError, IndexError) as e:
-            raise ValueError(f"Unexpected response structure from local LLM: {data}") from e
+            content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise ValueError(f"Unexpected response structure from local LLM: {data}") from exc
 
-        return LLMResponse(text=content,
-                           input_tokens=data.get('prompt_eval_count', 0),
-                           output_tokens=data.get('eval_count', 0)
-                           )
+        usage = data.get("usage") or {}
+        return LLMResponse(
+            text=content or "",
+            input_tokens=usage.get("prompt_tokens"),
+            output_tokens=usage.get("completion_tokens"),
+        )
+
 
 def get_llm_client() -> LLMClient:
     """GIVEN. Factory — reads config.LLM_BACKEND and returns the matching

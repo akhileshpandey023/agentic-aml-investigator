@@ -72,12 +72,12 @@ def run_graph_level(
 ) -> list[CaseRun]:
     """Run the full graph per case. `build` is injectable for tests."""
 
-    from langgraph.checkpoint.memory import MemorySaver
+    from aml_agents.checkpointing import new_memory_saver
 
     if build is None:
         from aml_agents.graph import build_graph as build
 
-    app = build(checkpointer=MemorySaver())
+    app = build(checkpointer=new_memory_saver())
     tag = uuid.uuid4().hex[:8]
     runs = []
     for index, case in enumerate(cases if cases is not None else all_cases()):

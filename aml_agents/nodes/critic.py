@@ -18,83 +18,83 @@ import json
 import time
 import re
 
-from aml_agents.schemas import CaseState, CriticReview, make_trace
 from aml_agents.llm_client import get_llm_client
-
 from aml_agents.prompts import CRITIC_PROMPT
+from aml_agents.schemas import CaseState, CriticReview, make_trace
+
+PASSAGE_EXCERPT_CHARS = 600  # per guidance passage shown to the critic
 
 def _format_review_context(state: CaseState) -> str:
-    """TODO (PROJECT_PLAN.md Phase 8): render state["risk_memo"] (as JSON)
-    alongside the same evidence risk_analyst saw, so the critic can check
-    groundedness, not just internal consistency.
+    """Render the memo (as JSON) and the same evidence the Risk Analyst saw,
+    with the same fields the CRITIC_PROMPT says each section has. The critic
+    can only check groundedness against what it is shown, so sanctions
+    candidates carry list/score/programme, adverse media carries its snippet and
+    guidance carries a text excerpt, not just titles.
     """
-    critic_review_prompt = []
-    risk_memo = state["risk_memo"]
-    if risk_memo:
-        try:
-            risk_memo = json.dumps(risk_memo.model_dump(), indent=2) # type: ignore
-        except:
-            risk_memo = 'no memo produced'
+
+    memo = state.get("risk_memo")
+    lines = [
+        "MEMO UNDER REVIEW:",
+        json.dumps(memo.model_dump(), indent=2) if memo else "no memo produced",
+        "",
+        "EVIDENCE: SANCTIONS CANDIDATES:",
+    ]
+    candidates = state.get("entity_candidates") or []
+    if candidates:
+        for c in candidates:
+            lines.append(
+                f" - [source id: {c.source_id}] matched name: {c.matched_name}; source list: {c.source_list}; "
+                f"match score: {c.match_score:.1f}; programme: {c.program or 'unknown'}; country: {c.country or 'unknown'}"
+            )
     else:
-        risk_memo = 'no memo produced'
+        lines.append(" (none)")
 
-    critic_review_prompt.append(risk_memo)
-
-    critic_review_prompt.append('SANCTIONS SCREENING CANDIDATES:')
-    if state['entity_candidates']:
-        for re in state['entity_candidates']:
-            critic_review_prompt.append(f''' - [source id: {re.source_id}], 
-            matched entity name: {re.matched_name}, entity matching score: {re.match_score:.1f}
-            ''')
+    lines += ["", "EVIDENCE: ADVERSE MEDIA:"]
+    findings = state.get("adverse_media_findings") or []
+    if findings:
+        for h in findings:
+            lines.append(f" - [source: {h.source}] {h.title}: {h.snippet}")
     else:
-        critic_review_prompt.append(' (none)')
+        lines.append(" (none)")
 
-    critic_review_prompt.append('ADVERSE MEDIA SCREENING: ')
-    if state['adverse_media_findings']:
-        for amh in state['adverse_media_findings']:
-            critic_review_prompt.append(f''' - [source: {amh.source}] {amh.title}''')
+    lines += ["", "EVIDENCE: REGULATORY GUIDANCE:"]
+    passages = state.get("regulatory_context") or []
+    if passages:
+        for p in passages:
+            lines.append(f" - [source document: {p.source_document}] {p.text[:PASSAGE_EXCERPT_CHARS]}")
     else:
-        critic_review_prompt.append(' (none)')
-
-    critic_review_prompt.append('REGULATORY GUIDANCE DOC:')
-    if state['regulatory_context']:
-        for rc in state['regulatory_context']:
-            critic_review_prompt.append(f''' - [source document: {rc.source_document}]''')
-    else:
-        critic_review_prompt.append(' (none)')
-    
-    return '\n '.join(critic_review_prompt)
+        lines.append(" (none)")
+    return "\n".join(lines)
 
 
-def _parse_critic_review(raw_text: str) -> CriticReview: 
-    """TODO: json.loads + CriticReview.model_validate."""
+def _parse_critic_review(raw_text: str) -> CriticReview:
+    """json.loads (tolerating a markdown code fence) + CriticReview.model_validate."""
 
-    return CriticReview.model_validate(json.loads(raw_text))
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw_text, flags=re.DOTALL)
+    return CriticReview.model_validate(json.loads((match.group(1) if match else raw_text).strip()))
 
 
 def critic_node(state: CaseState) -> dict:
-    """TODO (PROJECT_PLAN.md Phase 8): format the review context, write a
-    system prompt covering groundedness + consistency checks, call the LLM,
-    parse the response, and return
-    {"critic_feedback": ..., **make_trace(...)}.
+    """Format the review context, call the LLM with CRITIC_PROMPT, parse the
+    verdict, and return {"critic_feedback", "trace"}. Raises on an unparseable
+    reply, which the graph surfaces as a failed run rather than a silent approve.
     """
-    start_time = time.perf_counter()
-    cr_context = _format_review_context(state)
-    llm_response = get_llm_client().complete(system=CRITIC_PROMPT, user=cr_context)
-    match = re.search(r'```(?:json)?\s*(.*?)\s*```', llm_response.text, flags=re.DOTALL)
-    if match:
-        json_content = match.group(1).strip()   
-    else:
-        json_content = llm_response.text.strip()
-    parsed_review = _parse_critic_review(json_content)
-    end_time = time.perf_counter()
 
-    return {"critic_feedback": parsed_review, 
-            **make_trace(
-                node_name='critic',
-                summary_in=f"{state['critic_feedback']}",
-                token_usage={'input_token': int(llm_response.input_tokens), 'output_token': int(llm_response.output_tokens)}, # type: ignore
-                summary_out=f"{parsed_review}",
-                            duration_ms=(end_time-start_time)*1000
-                            ),
-                            }
+    start_time = time.perf_counter()
+    llm_response = get_llm_client().complete(system=CRITIC_PROMPT, user=_format_review_context(state))
+    parsed_review = _parse_critic_review(llm_response.text)
+    memo = state.get("risk_memo")
+
+    return {
+        "critic_feedback": parsed_review,
+        **make_trace(
+            node_name="critic",
+            summary_in=f"memo risk_score={memo.risk_score if memo else None} revision_count={state.get('revision_count', 0)}",
+            summary_out=f"{parsed_review}",
+            token_usage={
+                "input_token": int(llm_response.input_tokens or 0),
+                "output_token": int(llm_response.output_tokens or 0),
+            },
+            duration_ms=(time.perf_counter() - start_time) * 1000,
+        ),
+    }

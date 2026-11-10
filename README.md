@@ -102,3 +102,12 @@ If `uv sync` or `pytest` can't find a dependency that's clearly in
 watch for red error lines — a partial dependency-resolution failure can
 silently leave packages missing rather than erroring loudly, especially
 around the heavier ML packages.
+
+## Human review pause
+
+The graph is always compiled with a checkpointer and `interrupt_before=["human_gate"]`.
+A case with an escalation reason (high score, confirmed sanctions match, low critic
+confidence, critic still revising) pauses there; `investigate` prints why, and
+`resume --case-id ...` records the decision. Scoring bands and the sanctions floor
+live in `aml_agents/policy.py` and are enforced in code, not left to the LLM.
+Note: `EMBEDDING_MODEL` in config is not used (Chroma's default embedder is).

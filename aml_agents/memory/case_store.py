@@ -165,7 +165,7 @@ def list_cases(
         else:
             cursor = conn.execute(
                 """
-                SELECT * FORM cases
+                SELECT * FROM cases
                 ORDER BY updated_at DESC
                 """,
             )

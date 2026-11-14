@@ -12,6 +12,11 @@ import requests
 from aml_agents import config
 
 
+class LLMBackendError(RuntimeError):
+    """The LLM backend could not be reached or returned an error. The API
+    reports this as 502, distinct from a bug in our own code."""
+
+
 @dataclass
 class LLMResponse:
     """GIVEN. Normalised shape every backend must return from complete()."""
@@ -47,13 +52,18 @@ class AnthropicLLMClient(LLMClient):
         self._model = model.strip()
 
     def complete(self, system: str, user: str, *, max_tokens: int = 1024, temperature: float = 0.0) -> LLMResponse:
-        response = self._client.messages.create(
-            model=self._model,
-            system=system,
-            messages=[{"role": "user", "content": user}],
-            max_tokens=max_tokens,
-            temperature=temperature,
-        )
+        import anthropic
+
+        try:
+            response = self._client.messages.create(
+                model=self._model,
+                system=system,
+                messages=[{"role": "user", "content": user}],
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        except anthropic.APIError as exc:
+            raise LLMBackendError(f"Anthropic API call failed: {exc}") from exc
         text = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
         usage = getattr(response, "usage", None)
         return LLMResponse(
@@ -91,7 +101,7 @@ class LocalOpenAICompatLLMClient(LLMClient):
             response.raise_for_status()
             data = response.json()
         except (requests.RequestException, ValueError) as exc:
-            raise RuntimeError(f"Failed to get a completion from local LLM endpoint {url}: {exc}") from exc
+            raise LLMBackendError(f"Failed to get a completion from local LLM endpoint {url}: {exc}") from exc
 
         try:
             content = data["choices"][0]["message"]["content"]

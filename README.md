@@ -112,6 +112,27 @@ confidence, critic still revising) pauses there; `investigate` prints why, and
 live in `aml_agents/policy.py` and are enforced in code, not left to the LLM.
 Note: `EMBEDDING_MODEL` in config is not used (Chroma's default embedder is).
 
-## Deployment
+## Deployment (Docker and API)
 
-PROJECT_PLAN.md Phase 13 covers running the investigator in Docker and calling it over an HTTP API; DEPLOYMENT_GUIDE.md explains it step by step and maps it to an enterprise setup.
+PROJECT_PLAN.md Phase 13 and DEPLOYMENT_GUIDE.md explain it. Quick start:
+
+```bash
+cp .env.example .env                       # set LLM_BACKEND, keys, optional API_KEY
+docker compose build
+docker compose run --rm api python scripts/download_public_data.py --all
+docker compose run --rm api python scripts/ingest_guidance.py   # after adding guidance PDFs (data/README.md)
+docker compose up -d
+curl localhost:8000/health
+curl -s -X POST localhost:8000/investigations -H 'content-type: application/json' \
+  -d '{"entity_name": "Some Entity Name"}'          # add -H 'X-API-Key: ...' if API_KEY is set
+curl -s 'localhost:8000/investigations?pending=true'
+curl -s -X POST localhost:8000/investigations/<case_id>/decision -H 'content-type: application/json' \
+  -d '{"decision": "confirm", "reviewer": "you", "notes": ""}'
+```
+
+Interactive docs: http://localhost:8000/docs. Without Docker:
+`uv run uvicorn aml_agents.api:app --port 8000 --workers 1`.
+
+Status codes: 404 unknown case, 409 case not waiting for review, 422 bad input,
+401 bad `X-API-Key`, 502 LLM backend unreachable, 503 required data not loaded
+(run the data jobs) or case store unavailable.

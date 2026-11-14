@@ -14,8 +14,8 @@ import json
 
 from aml_agents.checkpointing import make_serde
 from aml_agents.graph import build_graph
+from aml_agents import service
 from aml_agents.memory import case_store
-from aml_agents.schemas import HumanDecision, new_case_state
 
 from aml_agents import config
 
@@ -34,55 +34,39 @@ def _get_checkpointer() -> SqliteSaver:
 
 
 def cmd_investigate(args: argparse.Namespace) -> None:
-    """Run a new investigation; save the case; print the memo, or say the case
-    is waiting for a human and why."""
+    """Run a new investigation and print the memo, or say the case is waiting
+    for a human and why."""
 
-    app = build_graph(checkpointer=_get_checkpointer())
-    state = new_case_state(entity_name=args.entity)
-    run_config = {"configurable": {"thread_id": state["case_id"]}}
-    app.invoke(state, config=run_config)  # type: ignore
-    snapshot = app.get_state(run_config)  # type: ignore
-    result = dict(snapshot.values)
-    case_store.save_case(result)  # type: ignore
+    result = service.start_investigation(build_graph(checkpointer=_get_checkpointer()), args.entity)
 
-    print(f"case_id: {result['case_id']}")
-    memo = result.get("risk_memo")
-    if snapshot.next:
-        print(f"PAUSED: awaiting human review before {', '.join(snapshot.next)}.")
-        for t in result.get("trace", []):
-            if t.node_name == "mark_human_review_required":
-                print(f"  {t.summary_out}")
+    print(f"case_id: {result.case_id}")
+    if result.status == "awaiting_review":
+        print("PAUSED: awaiting human review before human_gate.")
+        print("  Human review required: " + "; ".join(result.review_reasons))
         print(
-            f"  Resume with: python -m aml_agents.main resume --case-id {result['case_id']} "
+            f"  Resume with: python -m aml_agents.main resume --case-id {result.case_id} "
             "--decision confirm|override_clear|override_escalate --reviewer NAME"
         )
-    if memo:
-        print(json.dumps(memo.model_dump(), indent=2))
-    elif not snapshot.next:
+    if result.risk_memo:
+        print(json.dumps(result.risk_memo.model_dump(), indent=2))
+    elif result.status == "completed":
         print("No memo was produced; trace:")
-        for t in result.get("trace", []):
+        for t in result.trace:
             print(f"  [{t.node_name}] {t.summary_out}")
 
 
 def cmd_resume(args: argparse.Namespace) -> None:
     """Record a human decision on a paused case, resume past human_gate, save
-    and print the result. Fails clearly if the case is unknown or not waiting."""
+    and print the memo. Fails clearly if the case is unknown or not waiting."""
 
     app = build_graph(checkpointer=_get_checkpointer())
-    run_config = {"configurable": {"thread_id": args.case_id}}
-    snapshot = app.get_state(run_config)  # type: ignore
-    if not snapshot.values:
+    try:
+        result = service.resume_investigation(app, args.case_id, args.decision, args.reviewer, args.notes)
+    except service.CaseNotFound:
         sys.exit(f"No checkpointed case with id {args.case_id!r}.")
-    if tuple(snapshot.next) != ("human_gate",):
-        sys.exit(f"Case {args.case_id} is not waiting for human review (next steps: {list(snapshot.next) or 'none, already finished'}).")
-
-    human_decision = HumanDecision(decision=args.decision, reviewer=args.reviewer, notes=args.notes)
-    app.update_state(run_config, {"human_decision": human_decision})  # type: ignore
-    app.invoke(None, config=run_config)  # type: ignore
-    result = dict(app.get_state(run_config).values)  # type: ignore
-    case_store.save_case(result)  # type: ignore
-
-    print(json.dumps(result["risk_memo"].model_dump(), indent=2))
+    except service.CaseNotPending as exc:
+        sys.exit(str(exc))
+    print(json.dumps(result.risk_memo.model_dump(), indent=2))  # type: ignore[union-attr]
 
 
 def cmd_list_pending(_args: argparse.Namespace) -> None:

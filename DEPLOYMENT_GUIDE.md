@@ -66,6 +66,14 @@ when something fails.
 
 ## 3. Build the pieces
 
+A reference implementation is on branch `feature/phase-13-docker-api`
+(`aml_agents/service.py`, `aml_agents/api.py`, `Dockerfile`,
+`docker-compose.yml`, `tests/test_api.py`). Write your own first, then compare.
+Differences worth reading in the reference: `--no-install-project` plus
+`PYTHONPATH=/app` (the project itself is not pip-installed), a build-time model
+warm-up step (`scripts/warm_models.py`, skip with `--build-arg WARM_MODELS=false`),
+an optional `X-API-Key` check, and a 503 when sanctions data has not been downloaded.
+
 ### 3.1 Service layer (Plan Step 1)
 
 Why: the CLI and the API must behave the same. If each has its own copy of the

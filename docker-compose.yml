@@ -1,0 +1,45 @@
+# Run:  docker compose up -d --build
+# One-off jobs use the same image, e.g.:
+#   docker compose run --rm api python scripts/download_public_data.py --all
+#   docker compose run --rm api python scripts/ingest_guidance.py
+# The local-LLM profile adds an Ollama container:  docker compose --profile local-llm up -d
+
+services:
+  api:
+    build: .
+    image: aml-investigator:dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - path: .env        # optional: secrets such as ANTHROPIC_API_KEY and API_KEY (never baked into the image)
+        required: false
+    environment:
+      # Every path points into the mounted volume so state survives the container.
+      CASE_STORE_DB_PATH: /app/data/processed/case_store.sqlite
+      LANGGRAPH_CHECKPOINT_DB_PATH: /app/data/processed/checkpoints.sqlite
+      VECTOR_STORE_DIR: /app/data/processed/chroma
+      EVAL_DB_PATH: /app/data/processed/eval_results.sqlite
+      # LLM backend (override in .env). "local" talks to Ollama on your machine by default.
+      LLM_BACKEND: ${LLM_BACKEND:-local}
+      LOCAL_LLM_BASE_URL: ${LOCAL_LLM_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # needed on Linux; Docker Desktop already provides the name
+    volumes:
+      - ./data:/app/data
+    # Linux only: if the app cannot write ./data, either `chmod -R a+rwX data`
+    # or run the container as your own user by uncommenting:
+    # user: "${UID_GID:-10001:10001}"
+    restart: unless-stopped
+
+  # Optional local model server. Start with: docker compose --profile local-llm up -d
+  # then point the API at it: LOCAL_LLM_BASE_URL=http://ollama:11434
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "11434:11434"
+
+volumes:
+  ollama-models:

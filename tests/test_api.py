@@ -88,7 +88,9 @@ def test_sanctioned_entity_pauses_then_resumes(client):
 
     pending = client.get("/investigations", params={"pending": "true"}).json()
     assert [c["case_id"] for c in pending] == [case_id]
-    assert client.get(f"/investigations/{case_id}").json()["status"] == "awaiting_review"
+    stored = client.get(f"/investigations/{case_id}").json()
+    assert stored["status"] == "awaiting_review"
+    assert stored["review_reasons"] == body["review_reasons"]  # same reasons when read back later
 
     d = client.post(f"/investigations/{case_id}/decision",
                     json={"decision": "override_clear", "reviewer": "rev", "notes": "checked"})

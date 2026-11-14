@@ -125,6 +125,17 @@ def _row_status(row: dict) -> str:
     return "awaiting_review" if waiting else "completed"
 
 
+def _review_reasons_from_trace(trace: list[AgentTrace]) -> list[str]:
+    """The reasons are recorded by the mark_human_review_required node as
+    "Human review required: a; b. Pausing before human_gate."."""
+
+    for entry in reversed(trace):
+        if entry.node_name == "mark_human_review_required":
+            text = entry.summary_out.removeprefix("Human review required: ").split(". Pausing before")[0]
+            return [r.strip() for r in text.split(";") if r.strip()]
+    return []
+
+
 def get_case(case_id: str, *, db_path: Path = config.CASE_STORE_DB_PATH) -> CaseResult:
     """Read a saved case from the case store."""
 
@@ -134,13 +145,16 @@ def get_case(case_id: str, *, db_path: Path = config.CASE_STORE_DB_PATH) -> Case
     state = json.loads(row["state_json"])
     memo = state.get("risk_memo")
     decision = state.get("human_decision")
+    trace = [AgentTrace.model_validate(t) for t in state.get("trace", [])]
+    status = _row_status(row)
     return CaseResult(
         case_id=row["case_id"],
         entity_name=row["entity_name"],
-        status=_row_status(row),  # type: ignore[arg-type]
+        status=status,  # type: ignore[arg-type]
         risk_memo=RiskMemo.model_validate(memo) if memo else None,
+        review_reasons=_review_reasons_from_trace(trace) if status == "awaiting_review" else [],
         human_decision=HumanDecision.model_validate(decision) if decision else None,
-        trace=[AgentTrace.model_validate(t) for t in state.get("trace", [])],
+        trace=trace,
     )
 
 

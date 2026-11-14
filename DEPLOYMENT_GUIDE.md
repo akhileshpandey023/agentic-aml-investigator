@@ -208,6 +208,27 @@ Things to understand:
   another compose service: the address is the service name,
   `http://ollama:11434`. Compose gives each service a DNS name on a private network.
 
+### 3.5 Shrinking the image: CPU-only PyTorch
+
+The lockfile currently resolves PyTorch from PyPI, whose Linux wheels depend on
+CUDA libraries you cannot use in this container (no GPU). Add this to
+`pyproject.toml`, then run `uv lock` on a machine with normal internet access
+(it needs `download.pytorch.org`) and commit the new `uv.lock`:
+
+```toml
+[tool.uv.sources]
+torch = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+```
+
+Rebuild and compare `docker images` before and after. Expect the image to
+drop by several GB. The cost: the lockfile now also pins CPU wheels, so local
+macOS/Windows installs use the same index; that is fine for this project.
+
 ---
 
 ## 4. Run and inspect
@@ -257,7 +278,7 @@ Prove the three rules from section 1 yourself:
 | `No such file ... sanctions` | Data jobs not run, or `./data` not mounted | Run the one-off jobs; check `volumes:` |
 | LLM calls time out from container | `localhost` used for the host | `host.docker.internal` or service name |
 | Build is slow on every change | `COPY . .` before dependency install | Reorder as in 3.3 |
-| Image is huge | PyTorch (via sentence-transformers) | CPU-only index; check which package pulls it in |
+| Image is huge | PyTorch (via sentence-transformers); on Linux the default wheels bring ~40 NVIDIA CUDA packages (`grep -c 'name = "nvidia' uv.lock`) | CPU-only torch, see 3.5 |
 | First request very slow | Embedding model downloading on first use | Warm up at build time or mount a cache volume |
 | `no space left on device` | Old images and build cache | `docker system df`, then `docker system prune` |
 | Two requests, second hangs or `database is locked` | More than one worker or process writing SQLite | `--workers 1`; see section 6 |
